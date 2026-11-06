@@ -1,0 +1,6 @@
+{
+  "description": "herdr-adapter entrypoints",
+  "modules": [
+    "./register.ts"
+  ]
+}

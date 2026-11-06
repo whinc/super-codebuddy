@@ -1,0 +1,15 @@
+{
+  "name": "super-codebuddy",
+  "description": "CodeBuddy plugins for Herdr",
+  "owner": {
+    "name": "whinc"
+  },
+  "plugins": [
+    {
+      "name": "herdr-adapter",
+      "description": "Reports CodeBuddy session state (idle / working / blocked) to Herdr panes",
+      "version": "0.1.0",
+      "source": "./plugin"
+    }
+  ]
+}

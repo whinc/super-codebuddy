@@ -1,0 +1,11 @@
+{
+  "name": "herdr-adapter",
+  "version": "0.1.0",
+  "description": "CodeBuddy Mod that reports session state to Herdr",
+  "scripts": {
+    "test": "node --test test.js"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

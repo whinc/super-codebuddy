@@ -1,0 +1,9 @@
+{
+  "name": "herdr-adapter",
+  "version": "0.1.0",
+  "description": "Reports CodeBuddy session state (idle / working / blocked) to Herdr panes",
+  "author": {
+    "name": "whinc",
+    "url": "https://github.com/whinc"
+  }
+}
