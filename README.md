@@ -1,5 +1,7 @@
 # herdr-adapter
 
+[![test](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml/badge.svg)](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml)
+
 Herdr 用面板（pane）显示哪些在忙、哪些在等你、哪些空闲。Herdr 看不到 CodeBuddy
 会话内部，所以这个 [CodeBuddy Mod](https://www.codebuddy.cn/docs/cli/mods) 把会话事件
 翻译成 Herdr 状态：一轮开始时面板变成 `working`，权限确认等你操作时变成 `blocked`，
