@@ -28,12 +28,11 @@ Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process 
 | `turn.start` | `working` |
 | `tool.check` → `ask` | `blocked` — a permission prompt is waiting on you |
 | `tool.call` settles | `working` — clears `blocked` once approved, denial included |
-| `session.compact` | `working` — the turn continues after compaction |
 | `turn.complete` | `idle` |
 | `session.end` (`clear`, `resume`) | `idle` — the process outlives the conversation |
 | `session.end` (anything else) | releases the agent |
 
-Subagent loops are ignored: while the main turn runs, the pane stays busy.
+Subagent turns are ignored — the pane stays busy while the main turn runs — but a subagent's permission prompt still reports `blocked`, because it waits on the same person.
 
 ## Why it is cheap
 
@@ -51,6 +50,8 @@ Needs CodeBuddy Code with Mods (beta; verified on 2.181.0). The hooks are TypeSc
 npm test
 ```
 
+`npm run eval` scores the plugin with `codebuddy plugin eval`: two cases (a plain turn, and a tool call that must survive the `tool.check` / `tool.call` hooks), three runs each, against a no-plugin baseline. The observer must score the same with and without it, so a non-zero delta is the bug. Its report lands in `plugin/evals/results/`.
+
 To run a checkout instead of the marketplace install:
 
 ```sh
@@ -64,3 +65,5 @@ Sandbox rules, verification and troubleshooting: [AGENTS.md](AGENTS.md). Referen
 ## Credits
 
 The idea comes from [herdr-codebuddy](https://github.com/Ziy1-Tan/herdr-codebuddy).
+
+[herdrdev/herdr#4932](https://github.com/herdrdev/herdr/pull/4932) asks Herdr to ship CodeBuddy support upstream. It is still open, so until it lands this adapter is the stand-in — once Herdr reports CodeBuddy natively, this plugin has nothing left to do.

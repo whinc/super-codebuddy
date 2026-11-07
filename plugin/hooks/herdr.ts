@@ -90,20 +90,17 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
       return report({ state: 'idle' });
     },
 
-    compact(agentId?: string) {
-      if (agentId) return Promise.resolve();
-      return report({ state: 'working' });
-    },
-
-    /** The verdict of tool.check: ask is the only one that waits on a person. */
-    check(decision: string, agentId?: string) {
-      if (agentId || decision !== 'ask') return Promise.resolve();
+    /**
+     * The verdict of tool.check: ask is the only one that waits on a person.
+     * A subagent's prompt waits on the same person, so it is reported too.
+     */
+    check(decision: string) {
+      if (decision !== 'ask') return Promise.resolve();
       return report({ state: 'blocked' });
     },
 
     /** Runs after a tool call settles, approved or not: the pane is working again. */
-    toolDone(agentId?: string) {
-      if (agentId) return Promise.resolve();
+    toolDone() {
       return report({ state: 'working' });
     },
 

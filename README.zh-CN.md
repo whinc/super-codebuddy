@@ -28,12 +28,11 @@ Herdr 会把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的
 | `turn.start` | `working` |
 | `tool.check` → `ask` | `blocked`——有权限确认在等人处理 |
 | `tool.call` 结算 | `working`——批准后清除 `blocked`，工具调用被拒绝也一样 |
-| `session.compact` | `working`——压缩后这一轮继续 |
 | `turn.complete` | `idle` |
 | `session.end`（`clear`、`resume`） | `idle`——进程比这次对话活得久 |
 | `session.end`（其他情况） | 释放 agent |
 
-子 agent 循环被忽略：只要主轮还在进行，面板就算忙。
+子 agent 的 turn 循环被忽略：只要主轮还在进行，面板就算忙；但子 agent 的权限确认照样报 `blocked`，因为等的是同一个人。
 
 ## 为什么开销低
 
@@ -51,6 +50,8 @@ Herdr 会把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的
 npm test
 ```
 
+`npm run eval` 用 `codebuddy plugin eval` 评估插件：两个用例（一轮普通对话、一次必须穿过 `tool.check` / `tool.call` 钩子的工具调用），各跑 3 轮，并与不带插件的基线对比。这是观察型插件，两侧分数必须一致，出现差值即为缺陷。报告输出到 `plugin/evals/results/`。
+
 想跑本地副本而不是市场版：
 
 ```sh
@@ -64,3 +65,5 @@ codebuddy --plugin-dir ./plugin
 ## 致谢
 
 本项目的思路受 [herdr-codebuddy](https://github.com/Ziy1-Tan/herdr-codebuddy) 启发。
+
+[herdrdev/herdr#4932](https://github.com/herdrdev/herdr/pull/4932) 是请求 Herdr 官方支持 CodeBuddy 的 PR，目前尚未合并。在它合并之前，本项目作为现阶段的替代方案；官方支持落地后，本插件即可退役。

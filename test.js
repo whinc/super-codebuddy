@@ -98,12 +98,34 @@ test('releases the pane on a real exit and stays idle on clear', async () => {
   assert.equal(arg(second.spawned[0].args, '--state'), 'idle');
 });
 
-test('ignores subagent loops', async () => {
+test('ignores subagent turns', async () => {
   const { spawned, adapter } = await harness();
   await adapter.turnStart(undefined, 'agent-1');
   await adapter.turnComplete('agent-1');
-  await adapter.check('ask', 'agent-1');
-  assert.deepEqual(spawned, []);
+  assert.deepEqual(spawned, [], 'a subagent turn does not move the pane');
+});
+
+test('reports a subagent permission prompt from the tool.check hook', async () => {
+  // A fresh module instance: the adapter caches env and last state per import.
+  const fresh = pathToFileURL(path.join(__dirname, 'plugin', 'hooks', 'register.ts')).href + '?subagent-ask';
+  const { register } = await import(fresh);
+  const spawned = [];
+  const handlers = {};
+  const $ = {
+    env: { get: async name => ENV[name] },
+    session: { id: async () => 'session-1' },
+    process: { run: async argv => { spawned.push(argv); } },
+  };
+  register((name, handler) => { handlers[name] = handler; });
+
+  const verdict = await handlers['tool.check'](
+    $, { tool_use_id: 'toolu_1', agentId: 'agent-1' }, async () => ({ decision: 'ask' })
+  );
+  await new Promise(setImmediate);
+
+  assert.equal(verdict.decision, 'ask', 'the verdict passes through untouched');
+  assert.equal(spawned.length, 1);
+  assert.equal(arg(spawned[0], '--state'), 'blocked', 'the prompt is visible to the pane');
 });
 
 test('blocks only when the permission verdict asks', async () => {
@@ -147,7 +169,7 @@ test('register wires every lifecycle event', async () => {
   const events = [];
   register(pattern => events.push(pattern));
   assert.deepEqual(events, [
-    'session.start', 'turn.start', 'turn.complete', 'session.compact',
+    'session.start', 'turn.start', 'turn.complete',
     'tool.check', 'tool.call', 'session.end',
   ]);
 });

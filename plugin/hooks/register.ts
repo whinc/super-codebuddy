@@ -70,18 +70,18 @@ export function register(on: On): void {
     return next(e);
   });
 
-  on('session.compact', async ($, e, next) => {
-    const adapter = await use($);
-    if (adapter.enabled) quiet(adapter.compact(e.agentId));
-    return next(e);
-  });
+  // Nothing listens to session.compact: auto-compaction runs inside a turn that
+  // is already working, and a manual compaction outside one has no turn.complete
+  // to bring the pane back to idle.
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e);
     // A $.tool.check query carries no tool_use_id; only real calls wait on a person.
+    // Subagent calls are included: their prompt waits on the same person, and the
+    // pane showing "busy" through that wait is what this mod exists to prevent.
     if (e.tool_use_id) {
       const adapter = await use($);
-      if (adapter.enabled) quiet(adapter.check(verdict.decision, e.agentId));
+      if (adapter.enabled) quiet(adapter.check(verdict.decision));
     }
     return verdict;
   });
@@ -89,7 +89,7 @@ export function register(on: On): void {
   on('tool.call', async ($, e, next) => {
     const result = await next(e);
     const adapter = await use($);
-    if (adapter.enabled) quiet(adapter.toolDone(e.agentId));
+    if (adapter.enabled) quiet(adapter.toolDone());
     return result;
   });
 
