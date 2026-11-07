@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300" role="img">
+  <rect width="1000" height="300" rx="14" fill="#f5f5f5"/>
+  <rect x="25" y="84" width="224" height="118" rx="10" fill="#ffffff" stroke="#d9dbe3" stroke-width="1"/>
+  <text x="43" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5a6580">1</text>
+  <text x="43" y="122" font-family="ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="15" font-weight="600" fill="#2d3142">Herdr 注入环境变量</text>
+  <text x="43" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" fill="#4f5d75">HERDR_ENV=1</text>
+  <text x="43" y="174" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="11" fill="#5a6580">写进面板进程</text>
+  <line x1="252" y1="143" x2="262" y2="143" stroke="#4f5d75" stroke-width="1.2"/>
+  <path d="M262 143 l-7 -4 v8 z" fill="#4f5d75"/>
+  <rect x="267" y="84" width="224" height="118" rx="10" fill="#ffffff" stroke="#d9dbe3" stroke-width="1"/>
+  <text x="285" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5a6580">2</text>
+  <text x="285" y="122" font-family="ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="15" font-weight="600" fill="#2d3142">Mod 读取这三个变量</text>
+  <text x="285" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" fill="#4f5d75">HERDR_PANE_ID · HERDR_BIN_PATH</text>
+  <text x="285" y="174" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="11" fill="#5a6580">齐全才启用</text>
+  <line x1="494" y1="143" x2="504" y2="143" stroke="#4f5d75" stroke-width="1.2"/>
+  <path d="M504 143 l-7 -4 v8 z" fill="#4f5d75"/>
+  <rect x="509" y="84" width="224" height="118" rx="10" fill="#ffffff" stroke="#d9dbe3" stroke-width="1"/>
+  <text x="527" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5a6580">3</text>
+  <text x="527" y="122" font-family="ui-sans-serif, -apple-system, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', sans-serif" font-size="15" font-weight="600" fill="#2d3142">Mod 监听会话事件</text>
+  <text x="527" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" fill="#4f5d75">turn.start · tool.check ask</text>
+  <text x="527" y="174" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="11" fill="#5a6580">turn.complete · session.end</text>
+  <line x1="736" y1="143" x2="746" y2="143" stroke="#4f5d75" stroke-width="1.2"/>
+  <path d="M746 143 l-7 -4 v8 z" fill="#4f5d75"/>
+  <rect x="751" y="84" width="224" height="118" rx="10" fill="#fdf1ec" stroke="#bf4520" stroke-width="1.6"/>
+  <text x="769" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#5a6580">4</text>
+  <text x="769" y="122" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500" fill="#bf4520">herdr pane report-agent</text>
+  <text x="769" y="152" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5" fill="#4f5d75">--state · --seq</text>
+  <text x="769" y="174" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="11" fill="#5a6580">→ 面板：working · blocked · idle</text>
+  <text x="500.0" y="260" text-anchor="middle" font-family="ui-sans-serif, -apple-system, sans-serif" font-size="11.5" fill="#5a6580">只在可见状态变化时上报，重复状态直接丢弃。</text>
+</svg>

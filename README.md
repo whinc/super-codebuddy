@@ -1,67 +1,66 @@
 # herdr-adapter
 
+[English](README.md) · [简体中文](README.zh-CN.md)
+
 [![test](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml/badge.svg)](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml)
 
-Herdr 用面板（pane）显示哪些在忙、哪些在等你、哪些空闲。Herdr 看不到 CodeBuddy
-会话内部，所以这个 [CodeBuddy Mod](https://www.codebuddy.cn/docs/cli/mods) 把会话事件
-翻译成 Herdr 状态：一轮开始时面板变成 `working`，权限确认等你操作时变成 `blocked`，
-这轮结束时回到 `idle`——不用切窗口去看进度。
+Herdr reports the state of the agents it ships a detector for — `herdr agent start --kind` lists two dozen of them. CodeBuddy isn't one, so its pane has no state to show: it reads `unknown` for the whole turn, and you only find out it was waiting on a permission prompt when you switch back. This [CodeBuddy Mod](https://www.codebuddy.cn/docs/cli/mods) reports `working`, `blocked` and `idle` for the session to Herdr, so the pane answers that question for you.
 
-## 各事件上报什么
+![Herdr sidebar listing two CodeBuddy sessions under agents, with a CodeBuddy pane open beside it](docs/images/herdr-agents.png)
 
-| CodeBuddy 事件 | 上报给 Herdr 的状态 |
+**Status:** 0.1.0, experimental. Community adapter, not affiliated with Herdr — tracks Herdr and CodeBuddy Mod APIs; issues answered best-effort. MIT licensed. This repo is a one-plugin marketplace; the plugin is `herdr-adapter`.
+
+## Why this exists
+
+Herdr's detector list is the authority on what a pane can report. With no entry for CodeBuddy, the pane stays `unknown` while a turn runs, and `blocked` — the state that costs you time, because the turn is stopped until you answer — never appears at all.
+
+## How it works
+
+![Flow diagram: Herdr injects the env into the pane, the Mod builds an adapter, watches session events, then reports state back with herdr pane report-agent](docs/images/flow-en.svg)
+
+Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process it starts. The Mod reads them on its first hook call and builds an adapter only if all three are present. From then on every hook is observation: the event passes through untouched, and a visible change becomes one `herdr pane report-agent` call carrying the pane, the state and a monotonic `--seq`. That call is what puts the state in the sidebar and keeps `codebuddy --resume <id>` for the next restart.
+
+### What the pane shows
+
+| CodeBuddy event | Reported to Herdr |
 | --- | --- |
-| `session.start` | `idle`，附带会话 ID 与 `codebuddy --resume` 命令 |
+| `session.start` | `idle`, with the session id and a `codebuddy --resume` command |
 | `turn.start` | `working` |
-| `tool.check` → `ask` | `blocked`——有权限确认在等人处理 |
-| `tool.call` 结算 | `working`——批准后清除 `blocked`，工具调用被拒绝也一样 |
-| `session.compact` | `working`——压缩后这一轮继续 |
+| `tool.check` → `ask` | `blocked` — a permission prompt is waiting on you |
+| `tool.call` settles | `working` — clears `blocked` once approved, denial included |
+| `session.compact` | `working` — the turn continues after compaction |
 | `turn.complete` | `idle` |
-| `session.end`（`clear`、`resume`） | `idle`——进程比这次对话活得久 |
-| `session.end`（其他情况） | 释放 agent |
+| `session.end` (`clear`, `resume`) | `idle` — the process outlives the conversation |
+| `session.end` (anything else) | releases the agent |
 
-子 agent 循环被忽略：只要主轮还在进行，面板就算忙。
+Subagent loops are ignored: while the main turn runs, the pane stays busy.
 
-## 安装
+## Why it is cheap
 
-在 CodeBuddy 中：
+- **In-process.** Hooks run inside the CLI process, so no shell or Node hook process starts per event.
+- **Edge-triggered.** Reports are deduplicated by state: fifty tool calls in one turn send one `working` and one `idle`, not a hundred.
+- **Fire and forget.** Reports are never awaited; a turn doesn't wait on Herdr.
 
+A fork-per-event hook spends a shell, a Node process and a herdr call on every tool call; this one spawns herdr only when the visible state changes.
+
+## Development
+
+Needs CodeBuddy Code with Mods (beta; verified on 2.181.0). The hooks are TypeScript under `plugin/hooks/`, and `npm test` needs Node >= 22.18.
+
+```sh
+npm test
 ```
-/plugin marketplace add whinc/super-codebuddy
-/plugin install herdr-adapter@super-codebuddy
-```
 
-重启 CodeBuddy。上报从下一个会话开始；不在 Herdr 面板里（`HERDR_ENV` 未设置）时，
-Mod 会正常加载但不做任何事。
-
-本地开发时可以直接加载目录：
+To run a checkout instead of the marketplace install:
 
 ```sh
 codebuddy --plugin-dir ./plugin
 ```
 
-已安装的副本和 `--plugin-dir` 不能同时声明这个 Mod：引擎会因为身份重复拒绝加载，
-启动前先移除其中一个。
+Loading that copy alongside the marketplace install logs `Duplicate Mod identity`; keep one of the two.
 
-## 为什么开销低
+Sandbox rules, verification and troubleshooting: [AGENTS.md](AGENTS.md). References: [CodeBuddy Mods](https://www.codebuddy.cn/docs/cli/mods), [Add Herdr support to your agent](https://herdr.dev/docs/add-herdr-support/).
 
-- **进程内中间件。** 钩子运行在 CLI 进程里，每个事件都不会额外启动 shell 或 Node 钩子进程。
-- **边沿触发。** 上报按状态去重：一轮里五十次工具调用只发一次 `working` 和一次 `idle`，而非一百次。
-- **不阻塞。** 上报不被 await，这一轮从不等待 Herdr。
-- **单调 `--seq`。** 以时钟为种子的计数器让 Herdr 丢弃乱序到达的上报。
+## Credits
 
-上一版 shell 钩子对每个事件都要先 fork 一个 shell、再 fork Node、再调起 herdr。
-这个 Mod 只在可见状态变化时才启动 herdr。
-
-Mod 无法打开 Herdr 的 NDJSON socket，所以上报走 `herdr pane report-agent`。
-原因见 [ADR 0002](docs/adr/0002-mod-sandbox-cli-transport.md)。
-
-## 开发
-
-安装、沙箱规则与排查：[AGENTS.md](AGENTS.md)。
-
-参考：[Add Herdr support to your agent](https://herdr.dev/docs/add-herdr-support/)。
-
-## 致谢
-
-本项目的思路受 [herdr-codebuddy](https://github.com/Ziy1-Tan/herdr-codebuddy) 启发。
+The idea comes from [herdr-codebuddy](https://github.com/Ziy1-Tan/herdr-codebuddy).
