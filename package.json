@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "CodeBuddy Mod that reports session state to Herdr",
   "scripts": {
-    "test": "node --test test.js"
+    "test": "node --test test.js",
+    "eval": "codebuddy plugin eval ./plugin --runs 3 --ablation with-without --trust-plugin --no-publish --allow-tools Write"
   },
   "engines": {
     "node": ">=22.18"
