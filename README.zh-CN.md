@@ -10,6 +10,27 @@ Herdr 会给它支持的 agent 报状态——`herdr agent start --kind` 里列�
 
 **状态：** 0.1.0，实验性。社区适配器，与 Herdr 官方无关——跟随 Herdr 与 CodeBuddy Mod API 变动，issue 尽力回。MIT 许可。本仓库是一个单插件市场，插件名 `herdr-adapter`。
 
+## 它是什么
+
+一个 CodeBuddy Mod：由本仓库市场安装、加载进 CLI 进程的 TypeScript 钩子。它不是 Herdr 插件，也不会把 CodeBuddy 加进 `herdr agent start --kind`。
+
+它全部的对外动作只有两件：CodeBuddy 所在面板每次可见状态变化，发一次 `herdr pane report-agent`；会话真正结束时，发一次 `release-agent`。它不启动 CodeBuddy、不创建面板、不改动这一轮——事件原样放行，上报失败直接丢弃。
+
+## 安装
+
+需要 [Herdr](https://herdr.dev)（用到 `pane report-agent` 与 `pane release-agent`，实测 0.9.5）和带 Mods 的 CodeBuddy Code（beta，实测 2.181.0）。Node 只在跑测试时需要。
+
+在 CodeBuddy 会话里执行：
+
+```sh
+/plugin marketplace add whinc/super-codebuddy
+/plugin install herdr-adapter@super-codebuddy
+```
+
+然后在 Herdr 面板里启动 `codebuddy`——新会话会自动加载插件，`/reload-plugins` 可在当前会话生效。不在面板里时适配器不工作：`HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 由 Herdr 注入，三个都齐了它才会上报。
+
+面板里会把这个会话列为 `codebuddy`：第一轮之前是 `idle`，运行中是 `working`，等你处理权限确认时是 `blocked`。
+
 ## 为什么需要它
 
 面板能报什么，以 Herdr 的检测列表为准。没有 CodeBuddy 这一项，一轮跑起来面板始终是 `unknown`；而真正费时间的 `blocked`——那一轮停在那里等你处理——根本不会出现。

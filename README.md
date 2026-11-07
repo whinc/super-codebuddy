@@ -10,6 +10,27 @@ Herdr reports the state of the agents it ships a detector for — `herdr agent s
 
 **Status:** 0.1.0, experimental. Community adapter, not affiliated with Herdr — tracks Herdr and CodeBuddy Mod APIs; issues answered best-effort. MIT licensed. This repo is a one-plugin marketplace; the plugin is `herdr-adapter`.
 
+## What it is
+
+A CodeBuddy Mod: TypeScript hooks installed from this repo's marketplace and loaded into the CLI process. It is not a Herdr plugin, and it does not add CodeBuddy to `herdr agent start --kind`.
+
+Its whole output is one `herdr pane report-agent` call per visible state change for the pane CodeBuddy already runs in, plus one `release-agent` when the session really ends. It does not start CodeBuddy, create panes, or touch the turn: every event passes through, and a failed report is dropped.
+
+## Install
+
+Needs [Herdr](https://herdr.dev) with `pane report-agent` and `pane release-agent` (verified on 0.9.5), and CodeBuddy Code with Mods (beta; verified on 2.181.0). Node is only needed to run the tests.
+
+In a CodeBuddy session:
+
+```sh
+/plugin marketplace add whinc/super-codebuddy
+/plugin install herdr-adapter@super-codebuddy
+```
+
+Then start `codebuddy` inside a Herdr pane — a new session loads the plugin, `/reload-plugins` applies it in place. Anywhere else the adapter stays off: Herdr injects `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH`, and without all three it observes and reports nothing.
+
+The pane lists the session as `codebuddy`: `idle` before the first turn, `working` while one runs, `blocked` while a permission prompt waits on you.
+
 ## Why this exists
 
 Herdr's detector list is the authority on what a pane can report. With no entry for CodeBuddy, the pane stays `unknown` while a turn runs, and `blocked` — the state that costs you time, because the turn is stopped until you answer — never appears at all.
