@@ -91,11 +91,19 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     },
 
     /**
-     * The verdict of tool.check: ask is the only one that waits on a person.
-     * A subagent's prompt waits on the same person, so it is reported too.
+     * The verdict of tool.check: an ask waits on a person. A subagent's prompt
+     * waits on the same person, so it is reported too.
      */
     check(decision: string) {
       if (decision !== 'ask') return Promise.resolve();
+      return report({ state: 'blocked' });
+    },
+
+    /**
+     * The model's own question tool waits on the person whatever tool.check
+     * said: it is a question, not a permission decision.
+     */
+    asking() {
       return report({ state: 'blocked' });
     },
 

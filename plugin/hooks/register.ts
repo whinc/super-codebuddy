@@ -87,8 +87,11 @@ export function register(on: On): void {
   });
 
   on('tool.call', async ($, e, next) => {
-    const result = await next(e);
     const adapter = await use($);
+    // The question UI waits on the person for as long as it is open, so the
+    // pane blocks before the tool runs, not after it answers.
+    if (adapter.enabled && e.tool === 'AskUserQuestion') quiet(adapter.asking());
+    const result = await next(e);
     if (adapter.enabled) quiet(adapter.toolDone());
     return result;
   });

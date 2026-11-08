@@ -128,6 +128,33 @@ test('reports a subagent permission prompt from the tool.check hook', async () =
   assert.equal(arg(spawned[0], '--state'), 'blocked', 'the prompt is visible to the pane');
 });
 
+test('blocks the pane while the model question tool is open', async () => {
+  // A fresh module instance: the adapter caches env and last state per import.
+  const fresh = pathToFileURL(path.join(__dirname, 'plugin', 'hooks', 'register.ts')).href + '?ask-tool';
+  const { register } = await import(fresh);
+  const spawned = [];
+  const handlers = {};
+  const $ = {
+    env: { get: async name => ENV[name] },
+    session: { id: async () => 'session-1' },
+    process: { run: async argv => { spawned.push(argv); } },
+  };
+  register((name, handler) => { handlers[name] = handler; });
+
+  let answer;
+  const pending = handlers['tool.call'](
+    $, { tool: 'AskUserQuestion', tool_use_id: 'toolu_q' },
+    () => new Promise(resolve => { answer = resolve; })
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(spawned[0], '--state'), 'blocked', 'blocked before the question is answered');
+
+  answer({ result: 'blue' });
+  await pending;
+  await new Promise(setImmediate);
+  assert.equal(arg(spawned.at(-1), '--state'), 'working', 'working once it is answered');
+});
+
 test('blocks only when the permission verdict asks', async () => {
   const { spawned, adapter } = await harness();
   await adapter.check('allow');
