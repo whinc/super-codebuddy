@@ -27,6 +27,7 @@ function load($: EngineInterface): Promise<Adapter> {
         env,
         deps: {
           now: () => Date.now(),
+          every: (ms, fn) => $.clock.every(ms, fn),
           spawn(binary, args) {
             if (!engine) return;
             void engine.process.run([binary, ...args]).catch(() => {});

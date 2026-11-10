@@ -14,7 +14,7 @@ Herdr reports state for the agents it has a detector for; `herdr agent start --k
 
 A CodeBuddy Mod: TypeScript hooks installed from this repo's marketplace and loaded into the CLI process. It is not a Herdr plugin, and it does not add CodeBuddy to `herdr agent start --kind`.
 
-It does three things outside the process: one `herdr pane report-agent` call per visible state change for the pane CodeBuddy already runs in; one read of the pane's bottom snapshot before each idle report, to check for a visible approval or question UI; and one `release-agent` when the session really ends. It does not start CodeBuddy, create panes, or touch the turn. Every event passes through, and a failed report or read never changes the turn.
+It does four things outside the process: one `herdr pane report-agent` call per visible state change for the pane CodeBuddy already runs in; one read of the pane's bottom snapshot every 2 s while a turn runs, reporting `blocked` while someone is being waited on and back to `working` once the UI leaves the screen; one read before each idle report, to check for a visible approval or question UI; and one `release-agent` when the session really ends. It does not start CodeBuddy, create panes, or touch the turn. Every event passes through, and a failed report or read never changes the turn.
 
 ## Install
 
@@ -39,7 +39,7 @@ What a pane can report comes from Herdr's detector list. With no entry for CodeB
 
 ![Flow diagram: Herdr injects the env into the pane, the Mod builds an adapter, watches session events, then reports state back with herdr pane report-agent](docs/images/flow-en.svg)
 
-Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process it starts. The Mod reads them on its first hook call and builds an adapter only if all three are present. From then on every hook is observation. The event passes through untouched; before reporting `idle` it reads the detection snapshot once and reports `blocked` if a blocking UI is visible; a visible change becomes one `herdr pane report-agent` call carrying the pane, the state and a monotonic `--seq`. That call puts the state in the sidebar, and keeps `codebuddy --resume <id>` for the next restart.
+Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process it starts. The Mod reads them on its first hook call and builds an adapter only if all three are present. From then on every hook is observation. The event passes through untouched; while a turn runs it reads the detection snapshot every 2 s and reports `blocked` if a blocking UI is visible, back to `working` once it leaves; it also reads once before reporting `idle`; a visible change becomes one `herdr pane report-agent` call carrying the pane, the state and a monotonic `--seq`. That call puts the state in the sidebar, and keeps `codebuddy --resume <id>` for the next restart.
 
 ### What the pane shows
 
@@ -48,7 +48,8 @@ Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process 
 | `session.start` | `idle`, with the session id and a `codebuddy --resume` command; the screen check can make it `blocked` |
 | `turn.start` | `working` |
 | `tool.check` → `ask` | `blocked`: a permission prompt is waiting on you, with `--message waiting for permission` |
-| `tool.call` → `AskUserQuestion` | `blocked`: the model's own question is waiting on you, with `--message answer the question` |
+| `tool.call` → `AskUserQuestion` | `blocked`: the model's own question is waiting on you, with `--message answer the question`; a non-PTC session blocks right here |
+| every 2 s inside a turn | reads the detection snapshot: a question/approval UI still on screen keeps `blocked`, one that left returns `working`; a PTC session's question is only caught here, before the answer |
 | `tool.call` settles | `working` inside a turn; `idle` outside one: a `$.ui.ask` from another Mod returns to idle |
 | `turn.complete` | `idle`; the screen check can make it `blocked` |
 | `session.end` (`clear`, `resume`) | `idle`: the process outlives the conversation; the screen check can make it `blocked` |
@@ -62,11 +63,11 @@ Herdr's manifests cannot be used for CodeBuddy directly: Herdr's docs say a new 
 
 Before each `idle` report, the Mod runs `herdr pane read <pane> --source detection` for the same bottom snapshot Herdr uses, then applies a small strict rule set: permission confirmations, `AskUserQuestion`, and plan approval (`Ready to code?`). A rule needs both the title and the option rows in the bottom of the pane; text in the transcript does not count. A hit reports `blocked` with `--message` (`waiting for permission`, `answer the question`, `approve the plan`, `approve the workflow`); a miss, a failed read, or an older Herdr falls back to `idle`.
 
-Only `idle` is up for revision: a hook-reported `blocked` is never read or downgraded. There is no polling; each idle transition reads at most once, a read over 1.5 s counts as failed, and the process remembers the failure. Chinese rules are best-effort from the existing approval copy; the 2.181.0 TUI is English, so Chinese is precautionary.
+Polling inside a turn is required: in a PTC session the model's question is a nested AskService ask inside the `REPL` tool, and `AskUserQuestion`'s `tool.call` only fires after the answer, so no hook covers the wait. The poll runs only during a turn: a visible UI reports `blocked`, a miss reports `working` again, and a hook-reported `blocked` is never cleared by the screen. A read over 1.5 s counts as failed, and the process then stops reading the screen. Chinese rules are best-effort from the existing approval copy; the 2.181.0 TUI is English, so Chinese is precautionary.
 
 ## Why it is cheap
 
-Hooks run inside the CLI process, so no shell or Node hook process starts per event. Reports are deduplicated by state: fifty tool calls in one turn send one `working` and one `idle`. Each idle transition adds one detection read (about 250 ms here); the read and the report run in the background, so a turn doesn't wait on Herdr.
+Hooks run inside the CLI process, so no shell or Node hook process starts per event. Reports are deduplicated by state: fifty tool calls in one turn send one `working` and one `idle`. A running turn adds one detection read every 2 s (about 250 ms here), plus one per idle transition; the read and the report run in the background, so a turn doesn't wait on Herdr. The poll is temporary: it goes away once CodeBuddy raises an event before a PTC question waits.
 
 Built on CodeBuddy hooks (external scripts run per event) instead, the same job starts a Node process for every event, and that process calls herdr: fifty tool calls in a turn add up to hundreds of process starts. This mod spawns herdr only when the visible state changes, plus one read per idle transition.
 

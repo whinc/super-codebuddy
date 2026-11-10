@@ -149,16 +149,29 @@ function arg(argv, flag) {
 
 function harness({ env = ENV, snapshot = '', read } = {}) {
   const spawned = [];
+  const timers = [];
   const deps = {
     now: () => 1000,
     spawn: (binary, args) => spawned.push({ binary, args }),
+    every: (ms, fn) => {
+      const timer = { ms, fn, cancelled: false, cancel() { timer.cancelled = true; } };
+      timers.push(timer);
+      return timer;
+    },
     readSnapshot:
       read || (async () => (typeof snapshot === 'function' ? snapshot() : snapshot)),
   };
   return import(ADAPTER).then(({ createAdapter }) => ({
     spawned,
+    timers,
     adapter: createAdapter({ env, deps }),
   }));
+}
+
+/** Fires the adapter's live timers once, then lets the pending read settle. */
+async function tick(timers) {
+  for (const timer of timers) if (!timer.cancelled) timer.fn();
+  await new Promise(setImmediate);
 }
 
 function registerHarness({ stdout = PERMISSION_EN, tag = 'screen' } = {}) {
@@ -170,6 +183,9 @@ function registerHarness({ stdout = PERMISSION_EN, tag = 'screen' } = {}) {
     const $ = {
       env: { get: async name => ENV[name] },
       session: { id: async () => 'session-1' },
+      clock: {
+        every: () => ({ cancel() {} }),
+      },
       process: {
         run: async (argv, init) => {
           calls.push({ argv, init });
@@ -337,9 +353,24 @@ test('detect: recognises permission, plan and question screens', async () => {
   assert.equal(classify(QUESTION_EN).message, 'answer the question');
   assert.equal(classify(QUESTION_ZH).id, 'question');
   assert.equal(classify(QUESTION_BOXED).id, 'question');
+  assert.equal(classify(QUESTION_REVIEW).id, 'question', 'the review page still waits on the person');
   assert.equal(classify(ENTER_PLAN).id, 'permission');
   assert.equal(classify(WORKFLOW).id, 'workflow');
 });
+
+const QUESTION_REVIEW = [
+  '←  ☒ 颜色  ✔ Submit  →',
+  'Review your answers',
+  '●  选红色还是蓝色？',
+  '  → 红色',
+  '',
+  'Ready to submit your answers?',
+  '',
+  '❯ 1. Submit answers',
+  '  2. Cancel',
+  '',
+  'Enter to select · Tab/Arrow keys to navigate',
+].join('\n');
 
 test('detect: leaves idle screens and unrelated menus alone', async () => {
   const { classify } = await import(DETECT);
@@ -396,6 +427,52 @@ test('drops a slow screen read once a newer state event lands', async () => {
   await pending;
   assert.equal(reads, 1);
   assert.deepEqual(spawned.map(({ args }) => arg(args, '--state')), ['working']);
+});
+
+test('polls the screen during a turn and clears the block when it closes', async () => {
+  let screen = PERMISSION_EN;
+  const { spawned, adapter, timers } = await harness({ read: async () => screen });
+  await adapter.turnStart();
+  assert.equal(timers.length, 1, 'a running turn opens one poll timer');
+  assert.equal(timers[0].ms, 2000);
+
+  await tick(timers);
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked', 'the live UI wins over working');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'waiting for permission');
+
+  screen = IDLE;
+  await tick(timers);
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'the closed UI returns to working');
+});
+
+test('stops polling when the turn ends', async () => {
+  const { adapter, timers } = await harness({ snapshot: IDLE });
+  await adapter.turnStart();
+  await adapter.turnComplete();
+  assert.equal(timers[0].cancelled, true);
+});
+
+test('keeps a hook-reported block when the screen shows nothing', async () => {
+  const { spawned, adapter, timers } = await harness({ snapshot: IDLE });
+  await adapter.turnStart();
+  await adapter.check('ask');
+  await tick(timers);
+  assert.deepEqual(spawned.map(({ args }) => arg(args, '--state')), ['working', 'blocked']);
+});
+
+test('stops screen reads for the process after a poll fails', async () => {
+  let reads = 0;
+  const { spawned, adapter, timers } = await harness({
+    read: async () => {
+      reads++;
+      throw new Error('pane read failed');
+    },
+  });
+  await adapter.turnStart();
+  await tick(timers);
+  await tick(timers);
+  assert.equal(reads, 1, 'the failed read is remembered');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working');
 });
 
 test('returns to idle after a question asked outside a turn', async () => {

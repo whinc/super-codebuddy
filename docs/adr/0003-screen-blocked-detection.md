@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. The "no polling" part is superseded by ADR 0004.
 
 ## Context
 

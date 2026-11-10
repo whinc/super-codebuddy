@@ -149,10 +149,12 @@ export function classify(snapshot: string): Hit | null {
   }
 
   const options = bottomLines.filter(line => OPTION.test(line)).length;
+  // The review page before submitting has no "Esc to cancel": its Submit
+  // answers row is the tell, instead of the cancel hint.
   const asks =
     QUESTION_SELECT.test(bottomFlat) &&
-    QUESTION_CANCEL.test(bottomFlat) &&
     QUESTION_NAV.test(bottomFlat) &&
+    (QUESTION_CANCEL.test(bottomFlat) || QUESTION_SPECIAL.test(bottomFlat)) &&
     (bottomLines.some(line => /[?？]\s*$/.test(line)) || QUESTION_SPECIAL.test(bottomFlat));
 
   return asks && options >= 2
