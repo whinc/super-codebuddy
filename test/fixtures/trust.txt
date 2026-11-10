@@ -1,0 +1,19 @@
+  /private/tmp/herdr-trust-DqQ19f ❯  codebuddy
+╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Do you trust the files in this folder?                                                                                                         │
+│                                                                                                                                                │
+│ /private/tmp/herdr-trust-DqQ19f                                                                                                                │
+│                                                                                                                                                │
+│ CodeBuddy Code may read, write, or execute files contained in this directory. This can pose security risks, so only use files and bash         │
+│ commands from trusted sources.                                                                                                                 │
+│                                                                                                                                                │
+│ Learn more ( https://copilot.tencent.com/docs/cli )                                                                                            │
+│                                                                                                                                                │
+│   > 1. Trust folder only (herdr-trust-DqQ19f)                                                                                                  │
+│     2. Trust parent folder (tmp/**)                                                                                                            │
+│     3. Trust folder and all subdirectories (herdr-trust-DqQ19f/**)                                                                             │
+│     4. No, exit (escape)                                                                                                                       │
+│                                                                                                                                                │
+│ Enter to confirm • Esc to exit                                                                                                                 │
+│                                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

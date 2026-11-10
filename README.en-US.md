@@ -14,11 +14,11 @@ Herdr reports state for the agents it has a detector for; `herdr agent start --k
 
 A CodeBuddy Mod: TypeScript hooks installed from this repo's marketplace and loaded into the CLI process. It is not a Herdr plugin, and it does not add CodeBuddy to `herdr agent start --kind`.
 
-It does two things outside the process: one `herdr pane report-agent` call per visible state change for the pane CodeBuddy already runs in, and one `release-agent` when the session really ends. It does not start CodeBuddy, create panes, or touch the turn. Every event passes through, and a failed report is dropped.
+It does three things outside the process: one `herdr pane report-agent` call per visible state change for the pane CodeBuddy already runs in; one read of the pane's bottom snapshot before each idle report, to check for a visible approval or question UI; and one `release-agent` when the session really ends. It does not start CodeBuddy, create panes, or touch the turn. Every event passes through, and a failed report or read never changes the turn.
 
 ## Install
 
-Needs [Herdr](https://herdr.dev) with `pane report-agent` and `pane release-agent` (verified on 0.9.5), and CodeBuddy Code with Mods (beta; verified on 2.181.0). Node is only needed for the tests.
+Needs [Herdr](https://herdr.dev) with `pane report-agent`, `pane release-agent` and `pane read --source detection` (verified on 0.9.5), and CodeBuddy Code with Mods (beta; verified on 2.181.0). Node is only needed for the tests.
 
 In a CodeBuddy session:
 
@@ -29,7 +29,7 @@ In a CodeBuddy session:
 
 Then start `codebuddy` inside a Herdr pane: a new session loads the plugin, and `/reload-plugins` applies it to the current one. Anywhere else the adapter stays off. Herdr injects `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH`, and without all three it reports nothing.
 
-The pane lists the session as `codebuddy`: `idle` before the first turn, `working` while one runs, and `blocked` while a permission prompt, or the model's own question, waits on you.
+The pane lists the session as `codebuddy`: `idle` before the first turn, `working` while one runs, and `blocked` while a permission prompt, the model's own question, or a visible approval/question UI the hooks missed waits on you.
 
 ## Why this exists
 
@@ -39,28 +39,36 @@ What a pane can report comes from Herdr's detector list. With no entry for CodeB
 
 ![Flow diagram: Herdr injects the env into the pane, the Mod builds an adapter, watches session events, then reports state back with herdr pane report-agent](docs/images/flow-en.svg)
 
-Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process it starts. The Mod reads them on its first hook call and builds an adapter only if all three are present. From then on every hook is observation. The event passes through untouched; a visible change becomes one `herdr pane report-agent` call carrying the pane, the state and a monotonic `--seq`. That call puts the state in the sidebar, and keeps `codebuddy --resume <id>` for the next restart.
+Herdr writes `HERDR_ENV`, `HERDR_PANE_ID` and `HERDR_BIN_PATH` into the process it starts. The Mod reads them on its first hook call and builds an adapter only if all three are present. From then on every hook is observation. The event passes through untouched; before reporting `idle` it reads the detection snapshot once and reports `blocked` if a blocking UI is visible; a visible change becomes one `herdr pane report-agent` call carrying the pane, the state and a monotonic `--seq`. That call puts the state in the sidebar, and keeps `codebuddy --resume <id>` for the next restart.
 
 ### What the pane shows
 
 | CodeBuddy event | Reported to Herdr |
 | --- | --- |
-| `session.start` | `idle`, with the session id and a `codebuddy --resume` command |
+| `session.start` | `idle`, with the session id and a `codebuddy --resume` command; the screen check can make it `blocked` |
 | `turn.start` | `working` |
-| `tool.check` → `ask` | `blocked`: a permission prompt is waiting on you |
-| `tool.call` → `AskUserQuestion` | `blocked`: the model's own question is waiting on you |
-| `tool.call` settles | `working`: clears `blocked` once approved, denial included |
-| `turn.complete` | `idle` |
-| `session.end` (`clear`, `resume`) | `idle`: the process outlives the conversation |
+| `tool.check` → `ask` | `blocked`: a permission prompt is waiting on you, with `--message waiting for permission` |
+| `tool.call` → `AskUserQuestion` | `blocked`: the model's own question is waiting on you, with `--message answer the question` |
+| `tool.call` settles | `working` inside a turn; `idle` outside one: a `$.ui.ask` from another Mod returns to idle |
+| `turn.complete` | `idle`; the screen check can make it `blocked` |
+| `session.end` (`clear`, `resume`) | `idle`: the process outlives the conversation; the screen check can make it `blocked` |
 | `session.end` (anything else) | releases the agent |
 
 Subagent turns are ignored, so the pane stays busy while the main turn runs. A subagent's permission prompt still reports `blocked`, because it waits on the same person.
 
+### Screen fallback
+
+Herdr's manifests cannot be used for CodeBuddy directly: Herdr's docs say a new agent still needs a Herdr binary update, and a local manifest only patches rules. So the check lives in the Mod.
+
+Before each `idle` report, the Mod runs `herdr pane read <pane> --source detection` for the same bottom snapshot Herdr uses, then applies a small strict rule set: permission confirmations, `AskUserQuestion`, and plan approval (`Ready to code?`). A rule needs both the title and the option rows in the bottom of the pane; text in the transcript does not count. A hit reports `blocked` with `--message` (`waiting for permission`, `answer the question`, `approve the plan`, `approve the workflow`); a miss, a failed read, or an older Herdr falls back to `idle`.
+
+Only `idle` is up for revision: a hook-reported `blocked` is never read or downgraded. There is no polling; each idle transition reads at most once, a read over 1.5 s counts as failed, and the process remembers the failure. Chinese rules are best-effort from the existing approval copy; the 2.181.0 TUI is English, so Chinese is precautionary.
+
 ## Why it is cheap
 
-Hooks run inside the CLI process, so no shell or Node hook process starts per event. Reports are deduplicated by state: fifty tool calls in one turn send one `working` and one `idle`. They are never awaited, so a turn doesn't wait on Herdr.
+Hooks run inside the CLI process, so no shell or Node hook process starts per event. Reports are deduplicated by state: fifty tool calls in one turn send one `working` and one `idle`. Each idle transition adds one detection read (about 250 ms here); the read and the report run in the background, so a turn doesn't wait on Herdr.
 
-Built on CodeBuddy hooks (external scripts run per event) instead, the same job starts a Node process for every event, and that process calls herdr: fifty tool calls in a turn add up to hundreds of process starts. This mod spawns herdr only when the visible state changes.
+Built on CodeBuddy hooks (external scripts run per event) instead, the same job starts a Node process for every event, and that process calls herdr: fifty tool calls in a turn add up to hundreds of process starts. This mod spawns herdr only when the visible state changes, plus one read per idle transition.
 
 ## Development
 
@@ -69,6 +77,8 @@ Needs CodeBuddy Code with Mods (beta; verified on 2.181.0). The hooks are TypeSc
 ```sh
 npm test
 ```
+
+`test/fixtures/trust.txt` is a real detection snapshot of the trust-folder screen, kept to prove a startup gate is not mistaken for a blocker.
 
 `npm run eval` scores the plugin with `codebuddy plugin eval`: two cases (a plain turn, and a tool call that must survive the `tool.check` / `tool.call` hooks), three runs each, against a no-plugin baseline. The observer must score the same with and without it, so a non-zero delta is a bug. The report lands in `plugin/evals/results/`.
 
@@ -80,7 +90,7 @@ codebuddy --plugin-dir ./plugin
 
 Loading that copy alongside the marketplace install logs `Duplicate Mod identity`, so keep one of the two.
 
-Sandbox rules, verification and troubleshooting are in [AGENTS.md](AGENTS.md). References: [CodeBuddy Mods](https://www.codebuddy.cn/docs/cli/mods), [Add Herdr support to your agent](https://herdr.dev/docs/add-herdr-support/).
+Sandbox rules, verification and troubleshooting are in [AGENTS.md](AGENTS.md). Terms are in [GLOSSARY.md](GLOSSARY.md). References: [CodeBuddy Mods](https://www.codebuddy.cn/docs/cli/mods), [Add Herdr support to your agent](https://herdr.dev/docs/add-herdr-support/).
 
 ## Credits
 

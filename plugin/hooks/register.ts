@@ -31,6 +31,17 @@ function load($: EngineInterface): Promise<Adapter> {
             if (!engine) return;
             void engine.process.run([binary, ...args]).catch(() => {});
           },
+          async readSnapshot() {
+            const pane = env.HERDR_PANE_ID;
+            const binary = env.HERDR_BIN_PATH;
+            if (!pane || !binary) throw new Error('herdr env is incomplete');
+            const result = await $.process.run(
+              [binary, 'pane', 'read', pane, '--source', 'detection'],
+              { timeoutMs: 1500 },
+            );
+            if (result.exitCode !== 0) throw new Error('pane read failed');
+            return result.stdout;
+          },
         },
       });
     })();
@@ -89,7 +100,8 @@ export function register(on: On): void {
   on('tool.call', async ($, e, next) => {
     const adapter = await use($);
     // The question UI waits on the person for as long as it is open, so the
-    // pane blocks before the tool runs, not after it answers.
+    // pane blocks before the tool runs, not after it answers. $.ui.ask from
+    // another Mod is the same AskUserQuestion tool.call.
     if (adapter.enabled && e.tool === 'AskUserQuestion') quiet(adapter.asking());
     const result = await next(e);
     if (adapter.enabled) quiet(adapter.toolDone());

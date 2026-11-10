@@ -8,6 +8,8 @@
  * Contract: https://herdr.dev/tui/docs/add-herdr-support/
  */
 
+import { classify } from './detect.ts';
+
 export type HerdrState = 'idle' | 'working' | 'blocked';
 
 export type HerdrEnv = {
@@ -18,6 +20,7 @@ export type HerdrEnv = {
 
 export type Deps = {
   spawn(binary: string, args: string[]): void;
+  readSnapshot(): Promise<string>;
   now(): number;
 };
 
@@ -26,6 +29,7 @@ type Entry = {
   release?: boolean;
   sessionId?: string;
   force?: boolean;
+  message?: string;
 };
 
 const SOURCE = 'custom:codebuddy';
@@ -41,6 +45,11 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   let seq = deps.now();
   let lastState: HerdrState | null = null;
   let lastSessionId: string | undefined;
+  let turnActive = false;
+  /** A newer state event makes an in-flight screen read stale. */
+  let epoch = 0;
+  /** A failed read is remembered for the process, never retried. */
+  let screenBroken = false;
 
   function argsFor(entry: Entry): string[] {
     const args = [
@@ -52,6 +61,7 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
       '--seq', String(++seq),
     ];
     if (!entry.release) args.push('--state', entry.state as string);
+    if (entry.message) args.push('--message', entry.message);
     if (entry.sessionId) {
       args.push('--agent-session-id', entry.sessionId, '--', 'codebuddy', '--resume', entry.sessionId);
     }
@@ -70,24 +80,47 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     return Promise.resolve();
   }
 
+  /**
+   * Reports idle after reading the live bottom buffer. A visible blocking UI
+   * wins; a miss, a failed read, or an older Herdr without `detection` keeps
+   * the idle report. Hook-reported blocked/working are never touched here.
+   */
+  async function idle(entry: Entry): Promise<void> {
+    if (!enabled || screenBroken || !pane) return report(entry);
+    const mine = ++epoch;
+    try {
+      const hit = classify(await deps.readSnapshot());
+      if (mine !== epoch) return;
+      return report(hit ? { ...entry, state: 'blocked', message: hit.message } : entry);
+    } catch {
+      screenBroken = true;
+      if (mine !== epoch) return;
+      return report(entry);
+    }
+  }
+
   return {
     enabled,
 
     /** Called with $.session.id() as the session announces itself. */
     sessionStart(sessionId?: string) {
+      turnActive = false;
       const valid = sessionId && SESSION_ID.test(sessionId) ? sessionId : undefined;
-      return report({ state: 'idle', sessionId: valid, force: !!valid });
+      return idle({ state: 'idle', sessionId: valid, force: !!valid });
     },
 
     turnStart(sessionId?: string, agentId?: string) {
       if (agentId) return Promise.resolve();
+      turnActive = true;
+      epoch++;
       const changed = sessionId && SESSION_ID.test(sessionId) && sessionId !== lastSessionId;
       return report({ state: 'working', sessionId: changed ? sessionId : undefined });
     },
 
     turnComplete(agentId?: string) {
       if (agentId) return Promise.resolve();
-      return report({ state: 'idle' });
+      turnActive = false;
+      return idle({ state: 'idle' });
     },
 
     /**
@@ -96,25 +129,31 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
      */
     check(decision: string) {
       if (decision !== 'ask') return Promise.resolve();
-      return report({ state: 'blocked' });
+      epoch++;
+      return report({ state: 'blocked', message: 'waiting for permission' });
     },
 
     /**
      * The model's own question tool waits on the person whatever tool.check
-     * said: it is a question, not a permission decision.
+     * said: it is a question, not a permission decision. $.ui.ask from another
+     * Mod is the same tool.call, so this covers those questions too.
      */
     asking() {
-      return report({ state: 'blocked' });
+      epoch++;
+      return report({ state: 'blocked', message: 'answer the question' });
     },
 
-    /** Runs after a tool call settles, approved or not: the pane is working again. */
+    /** Runs after a tool call settles, approved or not. */
     toolDone() {
-      return report({ state: 'working' });
+      epoch++;
+      return report({ state: turnActive ? 'working' : 'idle' });
     },
 
     sessionEnd(reason: string) {
+      turnActive = false;
       // /clear and /resume end the conversation but keep the process and the pane.
-      if (reason === 'clear' || reason === 'resume') return report({ state: 'idle', force: true });
+      if (reason === 'clear' || reason === 'resume') return idle({ state: 'idle', force: true });
+      epoch++;
       return report({ release: true });
     },
   };
