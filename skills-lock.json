@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "skills": {
+    "readme-optimization": {
+      "source": "samber/developer-relations-skills",
+      "sourceType": "github",
+      "skillPath": "skills/readme-optimization/SKILL.md",
+      "computedHash": "ec3e32814dc730884e1888d471dd663dbe35791963f16b04390530fd4f6e30db"
+    }
+  }
+}
