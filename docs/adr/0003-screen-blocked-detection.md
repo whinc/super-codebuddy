@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. The "no polling" part is superseded by ADR 0004.
+Accepted. The "no polling" part was superseded by ADR 0004, then by ADR 0005; the
+idle-time fallback remains.
 
 ## Context
 

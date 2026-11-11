@@ -8,7 +8,7 @@
 
 ![Herdr 侧栏 agents 区列出两个 CodeBuddy 会话，右侧是打开的 CodeBuddy 面板](docs/images/herdr-agents.png)
 
-**状态：** 0.1.0，实验性。社区适配器，与 Herdr 官方无关；跟随 Herdr 与 CodeBuddy Mod API 变动，issue 尽力回。[MIT](LICENSE) 许可。本仓库是一个单插件市场，插件名 `herdr-adapter`。
+**状态：** 0.2.0，实验性。社区适配器，与 Herdr 官方无关；跟随 Herdr 与 CodeBuddy Mod API 变动，issue 尽力回。[MIT](LICENSE) 许可。本仓库是一个单插件市场，插件名 `herdr-adapter`。
 
 ## 它解决什么
 
@@ -18,7 +18,7 @@ Herdr 给自己认识的 agent 报状态，CodeBuddy 不在 `herdr agent start -
 
 ## 安装
 
-需要 [Herdr](https://herdr.dev)（实测 0.9.5，用到 `pane report-agent`、`pane release-agent` 与 `pane read --source detection`）和带 Mods 的 CodeBuddy Code（beta，实测 2.181.0）。只有跑测试才需要 Node。
+需要 [Herdr](https://herdr.dev)（实测 0.9.5，用到 `pane report-agent`、`pane release-agent` 与 `pane read --source detection`）和带 Mods 的 CodeBuddy Code 2.183 或更新（beta，实测 2.183.0；PTC 提问的等待期上报依赖 2.183 的 `classic.Notification` 分发，2.182 及更早会整段停在 `working`）。只有跑测试才需要 Node。
 
 在 CodeBuddy 会话里执行：
 
@@ -49,8 +49,8 @@ Herdr 给自己认识的 agent 报状态，CodeBuddy 不在 `herdr agent start -
 
 - 不会把 CodeBuddy 加进 `herdr agent start --kind`：那需要 Herdr 二进制更新，[上游 PR](https://github.com/herdrdev/herdr/pull/4932) 还没合并。
 - 只有在 Herdr 面板里启动的会话有效，普通终端里的 CodeBuddy 不上报。
-- 阻塞界面靠面板底部快照的规则匹配；中文审批文案属预防性覆盖，2.181.0 的 TUI 本身是英文。
-- 0.1.0，实验性；Herdr 或 CodeBuddy Mod API 变动都可能让它失效。
+- `blocked` 来自引擎在等待前发出的通知；只有 `idle` 兜底还靠面板底部快照的规则匹配，中文审批文案属预防性覆盖，2.183.0 的 TUI 本身是英文。
+- 0.2.0，实验性；Herdr 或 CodeBuddy Mod API 变动都可能让它失效。
 
 ## 开发
 

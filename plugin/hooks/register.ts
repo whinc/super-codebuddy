@@ -27,7 +27,6 @@ function load($: EngineInterface): Promise<Adapter> {
         env,
         deps: {
           now: () => Date.now(),
-          every: (ms, fn) => $.clock.every(ms, fn),
           spawn(binary, args) {
             if (!engine) return;
             void engine.process.run([binary, ...args]).catch(() => {});
@@ -107,6 +106,15 @@ export function register(on: On): void {
     const result = await next(e);
     if (adapter.enabled) quiet(adapter.toolDone());
     return result;
+  });
+
+  // The engine announces a prompt before it waits, and 2.183 hands that
+  // notification to Mods. In a PTC session AskUserQuestion's tool.call only
+  // arrives after the answer, so this is the report that covers the wait.
+  on('classic.Notification', async ($, e, next) => {
+    const adapter = await use($);
+    if (adapter.enabled) quiet(adapter.prompted(e.message));
+    return next(e);
   });
 
   on('session.end', async ($, e, next) => {

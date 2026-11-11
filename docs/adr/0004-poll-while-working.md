@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted, temporary. Supersedes ADR 0003's "no polling" while the engine has
-no pre-answer hook.
+Superseded by ADR 0005. It superseded ADR 0003's "no polling" while the engine
+had no pre-answer hook.
 
 ## Context
 

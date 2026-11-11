@@ -21,7 +21,6 @@ export type HerdrEnv = {
 export type Deps = {
   spawn(binary: string, args: string[]): void;
   readSnapshot(): Promise<string>;
-  every(ms: number, fn: () => void): { cancel(): void };
   now(): number;
 };
 
@@ -37,11 +36,9 @@ const SOURCE = 'custom:codebuddy';
 const AGENT = 'codebuddy';
 /** Herdr rejects a resume command with an apostrophe, a control character, or a path. */
 const SESSION_ID = /^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/;
-/**
- * A question UI can open mid-turn with no hook to announce it (PTC asks inside
- * REPL), so a running turn reads the screen on this period instead.
- */
-const POLL_MS = 2000;
+// shortcut: the engine's English prompt copy is the only discriminator; upgrade
+// to a typed prompt event when one lands.
+const PERMISSION_PREFIX = 'needs your permission to use ';
 
 export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   const pane = env.HERDR_PANE_ID;
@@ -56,12 +53,6 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   let epoch = 0;
   /** A failed read is remembered for the process, never retried. */
   let screenBroken = false;
-  /** The poll timer a running turn owns, if any. */
-  let poll: { cancel(): void } | null = null;
-  /** A read already in flight; a slow one must not stack behind the next tick. */
-  let reading = false;
-  /** True while the blocked state came from the screen, so a miss may clear it. */
-  let screenBlocked = false;
 
   function argsFor(entry: Entry): string[] {
     const args = [
@@ -93,46 +84,6 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   }
 
   /**
-   * While a turn runs, reads the bottom buffer on a timer: a question UI that
-   * no hook announced holds the pane at blocked until it leaves the screen.
-   * Hook-reported blocked/working are not cleared by a miss here.
-   */
-  async function pollScreen(): Promise<void> {
-    if (!enabled || screenBroken || reading || !turnActive) return;
-    reading = true;
-    let hit: Hit | null = null;
-    try {
-      hit = classify(await deps.readSnapshot());
-    } catch {
-      screenBroken = true;
-      stopPolling();
-      return;
-    } finally {
-      reading = false;
-    }
-    if (!turnActive) return;
-    if (hit) {
-      screenBlocked = true;
-      return report({ state: 'blocked', message: hit.message });
-    }
-    const wasScreen = screenBlocked;
-    screenBlocked = false;
-    if (wasScreen && lastState === 'blocked') return report({ state: 'working' });
-  }
-
-  function startPolling(): void {
-    if (!enabled || screenBroken || poll) return;
-    poll = deps.every(POLL_MS, () => {
-      void pollScreen();
-    });
-  }
-
-  function stopPolling(): void {
-    poll?.cancel();
-    poll = null;
-  }
-
-  /**
    * Reports idle after reading the live bottom buffer. A visible blocking UI
    * wins; a miss, a failed read, or an older Herdr without `detection` keeps
    * the idle report. Hook-reported blocked/working are never touched here.
@@ -157,8 +108,6 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     /** Called with $.session.id() as the session announces itself. */
     sessionStart(sessionId?: string) {
       turnActive = false;
-      screenBlocked = false;
-      stopPolling();
       const valid = sessionId && SESSION_ID.test(sessionId) ? sessionId : undefined;
       return idle({ state: 'idle', sessionId: valid, force: !!valid });
     },
@@ -166,9 +115,7 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     turnStart(sessionId?: string, agentId?: string) {
       if (agentId) return Promise.resolve();
       turnActive = true;
-      screenBlocked = false;
       epoch++;
-      startPolling();
       const changed = sessionId && SESSION_ID.test(sessionId) && sessionId !== lastSessionId;
       return report({ state: 'working', sessionId: changed ? sessionId : undefined });
     },
@@ -176,8 +123,6 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     turnComplete(agentId?: string) {
       if (agentId) return Promise.resolve();
       turnActive = false;
-      screenBlocked = false;
-      stopPolling();
       return idle({ state: 'idle' });
     },
 
@@ -188,7 +133,6 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     check(decision: string) {
       if (decision !== 'ask') return Promise.resolve();
       epoch++;
-      screenBlocked = false;
       return report({ state: 'blocked', message: 'waiting for permission' });
     },
 
@@ -199,21 +143,35 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
      */
     asking() {
       epoch++;
-      screenBlocked = false;
       return report({ state: 'blocked', message: 'answer the question' });
+    },
+
+    /**
+     * A permission or question UI announced before the engine waits. In a PTC
+     * session this is the only pre-answer signal: AskUserQuestion's tool.call
+     * comes after executeNested, so it cannot report the wait.
+     */
+    prompted(message: string) {
+      if (!message.startsWith(PERMISSION_PREFIX)) return Promise.resolve();
+      const tool = message.slice(PERMISSION_PREFIX.length);
+      const what =
+        tool === 'AskUserQuestion'
+          ? 'answer the question'
+          : tool === 'ExitPlanMode'
+            ? 'approve the plan'
+            : 'waiting for permission';
+      epoch++;
+      return report({ state: 'blocked', message: what });
     },
 
     /** Runs after a tool call settles, approved or not. */
     toolDone() {
       epoch++;
-      screenBlocked = false;
       return report({ state: turnActive ? 'working' : 'idle' });
     },
 
     sessionEnd(reason: string) {
       turnActive = false;
-      screenBlocked = false;
-      stopPolling();
       // /clear and /resume end the conversation but keep the process and the pane.
       if (reason === 'clear' || reason === 'resume') return idle({ state: 'idle', force: true });
       epoch++;

@@ -149,29 +149,16 @@ function arg(argv, flag) {
 
 function harness({ env = ENV, snapshot = '', read } = {}) {
   const spawned = [];
-  const timers = [];
   const deps = {
     now: () => 1000,
     spawn: (binary, args) => spawned.push({ binary, args }),
-    every: (ms, fn) => {
-      const timer = { ms, fn, cancelled: false, cancel() { timer.cancelled = true; } };
-      timers.push(timer);
-      return timer;
-    },
     readSnapshot:
       read || (async () => (typeof snapshot === 'function' ? snapshot() : snapshot)),
   };
   return import(ADAPTER).then(({ createAdapter }) => ({
     spawned,
-    timers,
     adapter: createAdapter({ env, deps }),
   }));
-}
-
-/** Fires the adapter's live timers once, then lets the pending read settle. */
-async function tick(timers) {
-  for (const timer of timers) if (!timer.cancelled) timer.fn();
-  await new Promise(setImmediate);
 }
 
 function registerHarness({ stdout = PERMISSION_EN, tag = 'screen' } = {}) {
@@ -183,9 +170,6 @@ function registerHarness({ stdout = PERMISSION_EN, tag = 'screen' } = {}) {
     const $ = {
       env: { get: async name => ENV[name] },
       session: { id: async () => 'session-1' },
-      clock: {
-        every: () => ({ cancel() {} }),
-      },
       process: {
         run: async (argv, init) => {
           calls.push({ argv, init });
@@ -429,50 +413,27 @@ test('drops a slow screen read once a newer state event lands', async () => {
   assert.deepEqual(spawned.map(({ args }) => arg(args, '--state')), ['working']);
 });
 
-test('polls the screen during a turn and clears the block when it closes', async () => {
-  let screen = PERMISSION_EN;
-  const { spawned, adapter, timers } = await harness({ read: async () => screen });
+test('blocks on the prompt announcement before the engine waits', async () => {
+  const { spawned, adapter } = await harness();
   await adapter.turnStart();
-  assert.equal(timers.length, 1, 'a running turn opens one poll timer');
-  assert.equal(timers[0].ms, 2000);
+  await adapter.prompted('needs your permission to use AskUserQuestion');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'answer the question');
 
-  await tick(timers);
-  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked', 'the live UI wins over working');
+  await adapter.toolDone();
+  await adapter.prompted('needs your permission to use ExitPlanMode');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'approve the plan');
+
+  await adapter.toolDone();
+  await adapter.prompted('needs your permission to use Bash');
   assert.equal(arg(spawned.at(-1).args, '--message'), 'waiting for permission');
-
-  screen = IDLE;
-  await tick(timers);
-  assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'the closed UI returns to working');
 });
 
-test('stops polling when the turn ends', async () => {
-  const { adapter, timers } = await harness({ snapshot: IDLE });
+test('ignores notifications that are not permission prompts', async () => {
+  const { spawned, adapter } = await harness();
   await adapter.turnStart();
-  await adapter.turnComplete();
-  assert.equal(timers[0].cancelled, true);
-});
-
-test('keeps a hook-reported block when the screen shows nothing', async () => {
-  const { spawned, adapter, timers } = await harness({ snapshot: IDLE });
-  await adapter.turnStart();
-  await adapter.check('ask');
-  await tick(timers);
-  assert.deepEqual(spawned.map(({ args }) => arg(args, '--state')), ['working', 'blocked']);
-});
-
-test('stops screen reads for the process after a poll fails', async () => {
-  let reads = 0;
-  const { spawned, adapter, timers } = await harness({
-    read: async () => {
-      reads++;
-      throw new Error('pane read failed');
-    },
-  });
-  await adapter.turnStart();
-  await tick(timers);
-  await tick(timers);
-  assert.equal(reads, 1, 'the failed read is remembered');
-  assert.equal(arg(spawned.at(-1).args, '--state'), 'working');
+  await adapter.prompted('CodeBuddy is waiting for your input');
+  assert.deepEqual(spawned.map(({ args }) => arg(args, '--state')), ['working']);
 });
 
 test('returns to idle after a question asked outside a turn', async () => {
@@ -516,6 +477,23 @@ test('register reads the detection source with a short timeout', async () => {
   assert.equal(arg(report.argv, '--message'), 'waiting for permission');
 });
 
+test('register blocks on the notification before the question tool runs', async () => {
+  const { calls, handlers, $ } = await registerHarness({ tag: 'notify' });
+  await handlers['turn.start']($, {}, async e => e);
+  await new Promise(setImmediate);
+  calls.length = 0;
+
+  const seen = await handlers['classic.Notification'](
+    $,
+    { message: 'needs your permission to use AskUserQuestion', notification_type: 'permission_prompt' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls[0].argv, '--state'), 'blocked', 'blocked before the tool.call arrives');
+  assert.equal(arg(calls[0].argv, '--message'), 'answer the question');
+  assert.equal(seen.message, 'needs your permission to use AskUserQuestion', 'passes through');
+});
+
 test('hooks stay inside the Mod sandbox', () => {
   const dir = path.join(__dirname, 'plugin', 'hooks');
   for (const name of readdirSync(dir).filter(n => n.endsWith('.ts'))) {
@@ -539,6 +517,6 @@ test('register wires every lifecycle event', async () => {
   register(pattern => events.push(pattern));
   assert.deepEqual(events, [
     'session.start', 'turn.start', 'turn.complete',
-    'tool.check', 'tool.call', 'session.end',
+    'tool.check', 'tool.call', 'classic.Notification', 'session.end',
   ]);
 });

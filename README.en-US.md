@@ -8,7 +8,7 @@ Let the Herdr sidebar show whether your CodeBuddy session is working, waiting fo
 
 ![Herdr sidebar listing two CodeBuddy sessions, with the CodeBuddy pane open on the right](docs/images/herdr-agents.png)
 
-**Status:** 0.1.0, experimental. A community adapter, not affiliated with Herdr; it follows Herdr and CodeBuddy Mod API changes, issues answered best-effort. [MIT](LICENSE) licensed. This repository is a single-plugin marketplace, plugin name `herdr-adapter`.
+**Status:** 0.2.0, experimental. A community adapter, not affiliated with Herdr; it follows Herdr and CodeBuddy Mod API changes, issues answered best-effort. [MIT](LICENSE) licensed. This repository is a single-plugin marketplace, plugin name `herdr-adapter`.
 
 ## What it solves
 
@@ -18,7 +18,7 @@ That is all it does: it does not start CodeBuddy, does not create a pane, and do
 
 ## Install
 
-Requires [Herdr](https://herdr.dev) (tested 0.9.5; uses `pane report-agent`, `pane release-agent` and `pane read --source detection`) and CodeBuddy Code with Mods (beta, tested 2.181.0). Node is only needed to run the tests.
+Requires [Herdr](https://herdr.dev) (tested 0.9.5; uses `pane report-agent`, `pane release-agent` and `pane read --source detection`) and CodeBuddy Code 2.183 or newer with Mods (beta, tested on 2.183.0; pre-answer PTC reporting relies on `classic.Notification` reaching Mods in 2.183 — 2.182 and older stay `working` through the wait). Node is only needed to run the tests.
 
 Inside a CodeBuddy session:
 
@@ -49,8 +49,8 @@ For how it decides and where the edges are, see [docs/how-it-works.md](docs/how-
 
 - It does not add CodeBuddy to `herdr agent start --kind`: that needs a Herdr binary update, and the [upstream PR](https://github.com/herdrdev/herdr/pull/4932) is unmerged.
 - Only sessions started inside a Herdr pane are covered; CodeBuddy in a plain terminal reports nothing.
-- Blocking screens are matched by rules over the pane's bottom snapshot; the Chinese approval strings are preventive, since the 2.181.0 TUI is English.
-- 0.1.0, experimental; a Herdr or CodeBuddy Mod API change can break it.
+- `blocked` comes from the engine's pre-wait notification; only the `idle` fallback still matches rules over the pane's bottom snapshot. The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
+- 0.2.0, experimental; a Herdr or CodeBuddy Mod API change can break it.
 
 ## Development
 
