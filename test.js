@@ -19,6 +19,14 @@ const TRUST_FIXTURE = readFileSync(
   path.join(__dirname, 'test', 'fixtures', 'trust.txt'),
   'utf8',
 );
+const PROSE_QUESTION = readFileSync(
+  path.join(__dirname, 'test', 'fixtures', 'prose-question.txt'),
+  'utf8',
+);
+const PROSE_DONE = readFileSync(
+  path.join(__dirname, 'test', 'fixtures', 'prose-done.txt'),
+  'utf8',
+);
 
 const PERMISSION_EN = [
   'Bash command',
@@ -147,10 +155,11 @@ function arg(argv, flag) {
   return argv[argv.indexOf(flag) + 1];
 }
 
-function harness({ env = ENV, snapshot = '', read } = {}) {
+function harness({ env = ENV, snapshot = '', read, sleep } = {}) {
   const spawned = [];
   const deps = {
     now: () => 1000,
+    sleep: sleep || (async () => {}),
     spawn: (binary, args) => spawned.push({ binary, args }),
     readSnapshot:
       read || (async () => (typeof snapshot === 'function' ? snapshot() : snapshot)),
@@ -378,6 +387,58 @@ test('reads the detection snapshot before reporting idle', async () => {
   assert.equal(arg(second.spawned.at(-1).args, '--state'), 'idle');
 });
 
+test('detect: a reply that signs off by asking is blocked', async () => {
+  const { classify } = await import(DETECT);
+  assert.equal(classify(PROSE_QUESTION).id, 'prose-question');
+  assert.equal(classify(PROSE_QUESTION).message, 'answer the question');
+  assert.equal(classify(PROSE_DONE), null, 'a summary sign-off is idle');
+});
+
+test('waits for the frame before the turn-end read', async () => {
+  const sleeps = [];
+  let reads = 0;
+  const { adapter } = await harness({
+    sleep: async ms => {
+      sleeps.push(ms);
+    },
+    read: async () => {
+      reads++;
+      return PROSE_QUESTION;
+    },
+  });
+  await adapter.turnComplete();
+  assert.deepEqual(sleeps, [300], 'one frame wait before reading');
+  assert.equal(reads, 1, 'a hit needs no second read');
+
+  sleeps.length = 0;
+  await adapter.sessionStart('session-abc');
+  assert.deepEqual(sleeps, [], 'no wait outside a turn end');
+});
+
+test('retries the read once when the reply has not painted yet', async () => {
+  let reads = 0;
+  const { spawned, adapter } = await harness({
+    read: async () => (++reads === 1 ? PROSE_DONE : PROSE_QUESTION),
+  });
+  await adapter.turnComplete();
+  assert.equal(reads, 2, 'one retry after the miss');
+  const last = spawned.at(-1).args;
+  assert.equal(arg(last, '--state'), 'blocked');
+  assert.equal(arg(last, '--message'), 'answer the question');
+});
+
+test('does not retry outside a turn end', async () => {
+  let reads = 0;
+  const { adapter } = await harness({
+    read: async () => {
+      reads++;
+      return PROSE_DONE;
+    },
+  });
+  await adapter.sessionStart('session-abc');
+  assert.equal(reads, 1);
+});
+
 test('falls back to idle when the screen read fails, and does not retry', async () => {
   let reads = 0;
   const { spawned, adapter } = await harness({
@@ -465,7 +526,8 @@ test('keeps the resume command when session start hits a blocker', async () => {
 test('register reads the detection source with a short timeout', async () => {
   const { calls, handlers, $ } = await registerHarness({ tag: 'screen-read' });
   await handlers['turn.complete']($, {}, async e => e);
-  await new Promise(setImmediate);
+  // The turn-end read waits one frame before touching the snapshot.
+  await new Promise(resolve => setTimeout(resolve, 350));
 
   const read = calls.find(({ argv }) => argv[1] === 'pane' && argv[2] === 'read');
   assert.ok(read, 'the adapter asked for the pane snapshot');

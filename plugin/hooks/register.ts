@@ -27,6 +27,7 @@ function load($: EngineInterface): Promise<Adapter> {
         env,
         deps: {
           now: () => Date.now(),
+          sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
           spawn(binary, args) {
             if (!engine) return;
             void engine.process.run([binary, ...args]).catch(() => {});

@@ -53,6 +53,16 @@ const PERMISSION_TITLES = [
 /** The workflow confirmation hides its title above the last rule. */
 const WORKFLOW_TITLE = /run a dynamic workflow\?/i;
 
+/** The banner CodeBuddy prints under a reply whose turn has ended. */
+const TURN_END = /^\s*[✔✓]\s+Worked for\b/;
+
+/** How many closing lines above the banner count as the reply's sign-off. */
+const CLOSING_LINES = 3;
+
+/** A sign-off that asks the person to answer or decide. */
+const PROSE_ASK =
+  /(?:回复|请确认|确认后|选一个|选哪|要不要|是否(?:继续|需要|可行)|需要我|你定|等你(?:确认|回复|决定)|逐条改|告诉我|回\s*[「“"'《])|(?:\breply with\b|\blet me know\b|\btell me\b|\bwhich one\b|\bwould you like\b|\bshould i\b|\bdo you want\b|\bconfirm\b|\bchoose\b)/i;
+
 /** AskUserQuestion chrome, English and best-effort Chinese. */
 const QUESTION_SELECT = /(?:enter\s+to\s+select|enter\s*(?:选择|選)|回车选择)/i;
 const QUESTION_CANCEL = /(?:esc\s+to\s+cancel|esc\s*(?:取消|退出|关闭)|按\s*esc)/i;
@@ -103,6 +113,25 @@ function flatten(text: string): string {
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** The sign-off of the last finished reply, above its turn-end banner. */
+function signOff(snapshot: string): string {
+  const lines = snapshot.replace(/\r\n?/g, '\n').split('\n');
+  let end = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (TURN_END.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return '';
+  const above: string[] = [];
+  for (let i = end - 1; i >= 0 && above.length < CLOSING_LINES; i--) {
+    const line = clean(lines[i]);
+    if (line !== '' && !HORIZONTAL_RULE.test(line)) above.unshift(line);
+  }
+  return above.join(' ');
 }
 
 function hasOption(text: string): boolean {
@@ -157,7 +186,11 @@ export function classify(snapshot: string): Hit | null {
     (QUESTION_CANCEL.test(bottomFlat) || QUESTION_SPECIAL.test(bottomFlat)) &&
     (bottomLines.some(line => /[?？]\s*$/.test(line)) || QUESTION_SPECIAL.test(bottomFlat));
 
-  return asks && options >= 2
-    ? { id: 'question', message: 'answer the question' }
-    : null;
+  if (asks && options >= 2) return { id: 'question', message: 'answer the question' };
+
+  // shortcut: a prose sign-off is a text guess, so only its last lines count;
+  // upgrade to an engine signal if turn.complete ever carries the reply.
+  const tail = signOff(snapshot);
+  const prose = tail !== '' && (/[?？]$/.test(tail) || PROSE_ASK.test(tail));
+  return prose ? { id: 'prose-question', message: 'answer the question' } : null;
 }

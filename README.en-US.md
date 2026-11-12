@@ -40,7 +40,7 @@ The pane lists the session as `codebuddy`:
 | --- | --- |
 | `idle` | Before the first turn, or after one ends; `codebuddy --resume <id>` picks it back up from the sidebar |
 | `working` | A turn is in progress |
-| `blocked` | A permission check, model question or plan approval is waiting for you; `--message` says which |
+| `blocked` | A permission check, model question, plan approval, or a prose question at the end of a turn is waiting for you; `--message` says which |
 
 Sub-agent turns are ignored: while the main turn runs, the pane is busy. A sub-agent's permission check still reports `blocked`, because it waits on the same person.
 
@@ -50,7 +50,7 @@ For how it decides and where the edges are, see [docs/how-it-works.md](docs/how-
 
 - It does not add CodeBuddy to `herdr agent start --kind`: that needs a Herdr binary update, and the [upstream PR](https://github.com/herdrdev/herdr/pull/4932) is unmerged.
 - Only sessions started inside a Herdr pane are covered; CodeBuddy in a plain terminal reports nothing.
-- `blocked` comes from the engine's pre-wait notification; only the `idle` fallback still matches rules over the pane's bottom snapshot. The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
+- `blocked` mostly comes from the engine's pre-wait notification; a prose question at the end of a turn is guessed from the bottom snapshot (word list in `plugin/hooks/detect.ts`, so an unusual phrasing is missed). The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
 - Experimental: a Herdr or CodeBuddy Mod API change can break it.
 
 ## Development
