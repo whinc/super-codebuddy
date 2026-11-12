@@ -2,13 +2,14 @@
 
 [简体中文](README.md) · [English](README.en-US.md)
 
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fwhinc%2Fsuper-codebuddy%2Fmain%2Fplugin%2F.codebuddy-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=blue)](https://github.com/whinc/super-codebuddy/blob/main/plugin/.codebuddy-plugin/plugin.json)
 [![test](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml/badge.svg)](https://github.com/whinc/super-codebuddy/actions/workflows/test.yml)
 
 Let the Herdr sidebar show whether your CodeBuddy session is working, waiting for you, or idle — so you stop switching back to find it was waiting on a confirmation all along.
 
 ![Herdr sidebar listing two CodeBuddy sessions, with the CodeBuddy pane open on the right](docs/images/herdr-agents.png)
 
-**Status:** 0.2.0, experimental. A community adapter, not affiliated with Herdr; it follows Herdr and CodeBuddy Mod API changes, issues answered best-effort. [MIT](LICENSE) licensed. This repository is a single-plugin marketplace, plugin name `herdr-adapter`.
+**Status:** Experimental. A community adapter, not affiliated with Herdr; it follows Herdr and CodeBuddy Mod API changes, issues answered best-effort. [MIT](LICENSE) licensed. This repository is a single-plugin marketplace, plugin name `herdr-adapter`.
 
 ## What it solves
 
@@ -50,7 +51,7 @@ For how it decides and where the edges are, see [docs/how-it-works.md](docs/how-
 - It does not add CodeBuddy to `herdr agent start --kind`: that needs a Herdr binary update, and the [upstream PR](https://github.com/herdrdev/herdr/pull/4932) is unmerged.
 - Only sessions started inside a Herdr pane are covered; CodeBuddy in a plain terminal reports nothing.
 - `blocked` comes from the engine's pre-wait notification; only the `idle` fallback still matches rules over the pane's bottom snapshot. The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
-- 0.2.0, experimental; a Herdr or CodeBuddy Mod API change can break it.
+- Experimental: a Herdr or CodeBuddy Mod API change can break it.
 
 ## Development
 
