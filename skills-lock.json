@@ -1,6 +1,12 @@
 {
   "version": 2,
   "skills": {
+    "changelog-writing": {
+      "source": "samber/developer-relations-skills",
+      "sourceType": "github",
+      "skillPath": "skills/changelog-writing/SKILL.md",
+      "computedHash": "3d0ad1535e89f2d03444718497e977b5ba2aa696d6e1578a6655928fbada682b"
+    },
     "readme-optimization": {
       "source": "samber/developer-relations-skills",
       "sourceType": "github",
