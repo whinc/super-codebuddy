@@ -60,6 +60,7 @@ disable-model-invocation: true
 - 读者：插件的使用者和维护者
 - 规范：没有既有 changelog 规范；提交是 conventional commits
 - Breaking：由第 2 步决定
+- 不要提仓库内部的决策文档：ADR、设计文档、评审记录都不进正文，连编号也不引用；只写使用者能观察到的行为变化
 
 要求它跑完自己的验证门：每条能对上 diff、没有编造的数字、breaking 三段齐全。把最终正文写进临时文件：
 
@@ -67,7 +68,7 @@ disable-model-invocation: true
 NOTES=$(mktemp /tmp/super-codebuddy-notes.XXXXXX)
 ```
 
-**完成条件**：notes 非空；每条都能在 diff 里找到依据；没有漏掉的 breaking。
+**完成条件**：notes 非空；每条都能在 diff 里找到依据；没有漏掉的 breaking；正文里没有 ADR、设计文档等内部决策引用。
 
 ## 5. 过门禁
 
