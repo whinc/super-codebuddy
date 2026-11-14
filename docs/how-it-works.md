@@ -2,19 +2,24 @@
 
 ![流程图：Herdr 把环境变量注入面板进程，Mod 建好 adapter，监听会话事件，再用 herdr pane report-agent 把状态报回去](images/flow-zh.svg)
 
-Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进程。Mod 在第一次钩子调用时读这三个变量，齐全才建 adapter。此后每个钩子只做观察，事件原样放行；引擎在弹出确认或提问前会发一条权限通知，Mod 通过 `classic.Notification` 收到后立刻报 `blocked`，工具结算或轮次结束时再报回 `working` / `idle`；要报 `idle` 时仍先读一次检测快照兜底；状态可见地变了，才发一次 `herdr pane report-agent`，带上面板、状态和单调递增的 `--seq`。侧栏的状态由此而来，重启后还能用 `codebuddy --resume <id>` 把会话接回来。
+Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进程。Mod 在第一次钩子调用时读这三个变量，齐全才建 adapter。此后每个钩子只做观察，事件原样放行。
+
+面板状态不是事件的流水账，而是两个事实的函数：**这一轮是否在跑**，以及**有没有正在等你的决定**。事实只由保证会到达的事件驱动：`classic.UserPromptSubmit` 与 `turn.start` 开始一轮，`classic.Stop` 与 `turn.complete` 结束一轮；工具结算从不结束一轮，所以漏掉轮次事件最坏是停在 `working`，不会谎报 `idle`。等待项按 `tool_use_id` 记在集合里，由该工具的 `classic.PostToolUse`／`tool.call` 结算、`classic.PermissionDenied` 或轮末 `Stop` 清除。状态或文案变了，才发一次 `herdr pane report-agent`，带上面板、状态和单调递增的 `--seq`；没被接受就重试，三次都失败则把这条记为未确认，等下一个事件补发。侧栏的状态由此而来，重启后还能用 `codebuddy --resume <id>` 把会话接回来。
 
 ## 面板显示什么
 
 | CodeBuddy 事件 | 上报给 Herdr 的状态 |
 | --- | --- |
 | `session.start` | `idle`，附带会话 ID 与 `codebuddy --resume` 命令；读屏命中阻塞界面则报 `blocked` |
+| `classic.UserPromptSubmit` | `working`：人刚提交了任务，这一轮从这里算起。`turn.start` 被采样漏掉也不影响 |
 | `turn.start` | `working` |
-| `tool.check` → `ask` | `blocked`：有权限确认在等人处理，带 `--message waiting for permission` |
+| `classic.Stop`／`StopFailure` | `idle`：引擎保证会发的轮末信号，清掉还挂着的等待项；`Stop` 的 `last_assistant_message` 收尾在提问则报 `blocked` |
+| `tool.check` → `ask` | `blocked`：有权限确认在等人处理，带 `--message waiting for permission`；按 `tool_use_id` 记录 |
 | `tool.call` → `AskUserQuestion` | `blocked`：模型自己的提问在等人回答，带 `--message answer the question`；非 PTC 会话在这一步就拦住 |
-| `classic.Notification` → `permission_prompt` | `blocked`：引擎在等待前发出 `needs your permission to use <tool>`；PTC 提问、计划批准都在这时拦住，回答或取消后由工具结算报回 |
-| `tool.call` 结算 | 轮内 `working`；轮外 `idle`：空闲时别的 Mod 用 `$.ui.ask` 提问，答完回空闲 |
-| `turn.complete` | `idle`：`reason` 为 `answer` 且回复收尾在提问（`answer` 字段）则报 `blocked`（`answer the question`）；轮末不读屏 |
+| `classic.Notification` → `permission_prompt` | `blocked`：引擎在等待前发出 `needs your permission to use <tool>`；PTC 提问、计划批准都在这时拦住 |
+| `classic.PostToolUse`／`PostToolUseFailure` / `tool.call` 结算 | 清掉这一次调用的等待项，回到 `working`；轮外（别的 Mod 用 `$.ui.ask` 提问）回 `idle` |
+| `classic.PermissionDenied` | 拒绝之后不再有工具结算，这里按 `tool_use_id` 清掉这次调用挂的等待；同时等着的其他确认不受影响 |
+| `turn.complete` | `idle`：`reason` 为 `answer` 且回复收尾在提问（`answer` 字段）则报 `blocked`（`answer the question`），`Stop` 的 `last_assistant_message` 兜同一份判定；轮末不读屏，下一次 `UserPromptSubmit` 清除 |
 | `session.end`（`clear`、`resume`） | `idle`：进程比这次对话活得久；读屏命中则报 `blocked` |
 | `session.end`（其他情况） | 释放 agent |
 
@@ -28,7 +33,7 @@ Herdr 的检测清单不能直接给 CodeBuddy 用：官方文档写明，新增
 
 ## 轮末文字提问
 
-`turn.complete` 的输入带 `reason` 和 `answer`：`answer` 是本轮最终的可见回复文本。`reason` 为 `answer` 时，Mod 只看 `answer` 最后三行；以问号收尾，或命中「回复／请确认／确认后／逐条改」这类词表，就报 `blocked`（`answer the question`）。这里不读屏：任务行、TUI 文案和滚动历史都不进这条判定，后台任务还在跑时也不会误报；`aborted`、`refusal`、`error` 收尾一律回 `idle`。
+`classic.Stop` 的 `last_assistant_message` 和 `turn.complete` 的 `answer` 是同一段话，两个事件互为备份：哪一个被采样漏掉，另一个都能让这条判定成立。`turn.complete` 的输入带 `reason` 和 `answer`：`answer` 是本轮最终的可见回复文本。`reason` 为 `answer` 时，Mod 只看 `answer` 最后三行；以问号收尾，或命中「回复／请确认／确认后／逐条改」这类词表，就报 `blocked`（`answer the question`）。这里不读屏：任务行、TUI 文案和滚动历史都不进这条判定，后台任务还在跑时也不会误报；`aborted`、`refusal`、`error` 收尾一律回 `idle`。
 
 ## 等待前的通知
 
@@ -38,7 +43,7 @@ PTC 会话里模型提问由 REPL 工具内部的 AskService 承接：引擎先�
 
 ## 为什么开销低
 
-钩子跑在 CLI 进程里，每个事件都不另外启动 shell 或 Node 钩子进程。上报按状态去重，一轮里五十次工具调用只发一次 `working` 和一次 `idle`。等待前的通知直接来自引擎事件，轮内不再读屏；只有每次 idle 转变读一次检测快照（约 250ms；轮末不读），读屏和上报都在后台，这一轮从不等待 Herdr。
+钩子跑在 CLI 进程里，每个事件都不另外启动 shell 或 Node 钩子进程。上报按状态和文案去重，一轮里五十次工具调用只发一次 `working` 和一次 `idle`。等待前的通知直接来自引擎事件，轮内不再读屏；只有每次 idle 转变读一次检测快照（约 250ms；轮末不读），读屏和上报都在后台，这一轮从不等待 Herdr。
 
 用 CodeBuddy 的 hooks（事件触发的外部脚本）实现同一件事，每个事件都要起一个 Node 进程，再由它调用 herdr，一轮五十次工具调用就是上百次进程启动。这个 Mod 只在可见状态变化时 spawn 一次 herdr，外加每次 idle 转变一次读屏。
 
@@ -51,3 +56,4 @@ PTC 会话里模型提问由 REPL 工具内部的 AskService 承接：引擎先�
 - [0005-prompt-notification](adr/0005-prompt-notification.md)
 - [0006-prose-question](adr/0006-prose-question.md)（已被 0007 取代）
 - [0007-turn-answer-not-screen](adr/0007-turn-answer-not-screen.md)
+- [0008-turn-facts-and-delivery](adr/0008-turn-facts-and-delivery.md)

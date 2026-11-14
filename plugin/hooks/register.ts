@@ -12,6 +12,10 @@
 import type { EngineInterface, On } from 'codebuddy-code';
 import { createAdapter, type Adapter, type HerdrEnv } from './herdr.ts';
 
+// A herdr call is a local CLI round trip. The timeout only bounds one that
+// hangs; the retries run detached, so no hook ever waits on this.
+const REPORT_TIMEOUT_MS = 2500;
+
 let engine: EngineInterface | undefined;
 let loading: Promise<Adapter> | undefined;
 
@@ -27,9 +31,11 @@ function load($: EngineInterface): Promise<Adapter> {
         env,
         deps: {
           now: () => Date.now(),
-          spawn(binary, args) {
-            if (!engine) return;
-            void engine.process.run([binary, ...args]).catch(() => {});
+          sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+          async send(binary, args) {
+            if (!engine) return false;
+            const result = await engine.process.run([binary, ...args], { timeoutMs: REPORT_TIMEOUT_MS });
+            return result.exitCode === 0;
           },
           async readSnapshot() {
             const pane = env.HERDR_PANE_ID;
@@ -53,6 +59,27 @@ function quiet(report: Promise<void>) {
   report.catch(() => {});
 }
 
+/**
+ * A classic tool hook names the call it is about. The id is what a wait is
+ * keyed by, so passing it is what lets the right prompt be cleared.
+ */
+function callOf(e: unknown): { tool?: string; toolUseId?: string } {
+  const ev = e as { tool_name?: unknown; tool_use_id?: unknown } | undefined;
+  return {
+    tool: typeof ev?.tool_name === 'string' ? ev.tool_name : undefined,
+    toolUseId: typeof ev?.tool_use_id === 'string' ? ev.tool_use_id : undefined,
+  };
+}
+
+/** classic.Stop carries the reply the turn ended on, sampled hook or not. */
+function lastReplyOf(e: unknown): string | undefined {
+  const text = (e as { last_assistant_message?: unknown } | undefined)?.last_assistant_message;
+  return typeof text === 'string' ? text : undefined;
+}
+
+// Every hook is registered by its literal event name: a name computed in a
+// loop reached the Mod with no delivery in the 2.183 probe, so the handlers
+// that look alike stay written out.
 export function register(on: On): void {
   const use = ($: EngineInterface) => {
     engine = $;
@@ -65,25 +92,46 @@ export function register(on: On): void {
     return next(e);
   });
 
+  // A person asked for work: the turn is under way from here, whether or not
+  // the sampled turn.start event lands.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const adapter = await use($);
+    if (adapter.enabled) quiet(adapter.submit());
+    return next(e);
+  });
+
   // A /clear or /resume ends the conversation under a new id and fires no
   // session.start, so every turn is a chance for the pane to learn the id; the
   // adapter only resends it when it changed.
   on('turn.start', async ($, e, next) => {
     if (e.agentId) return next(e);
     const adapter = await use($);
-    if (adapter.enabled) quiet(adapter.turnStart(await $.session.id(), e.agentId));
+    if (adapter.enabled) quiet(adapter.turnStart(await $.session.id()));
     return next(e);
   });
 
+  // Nothing listens to session.compact: auto-compaction runs inside a turn that
+  // is already working, and a manual compaction outside one has no turn.complete
+  // to bring the pane back to idle — Stop does.
   on('turn.complete', async ($, e, next) => {
     const adapter = await use($);
     if (adapter.enabled) quiet(adapter.turnComplete(e));
     return next(e);
   });
 
-  // Nothing listens to session.compact: auto-compaction runs inside a turn that
-  // is already working, and a manual compaction outside one has no turn.complete
-  // to bring the pane back to idle.
+  // Stop is the guaranteed turn end: it arrives even when turn.complete was
+  // sampled away, so a block whose tool never reports back cannot strand the pane.
+  on('classic.Stop', async ($, e, next) => {
+    const adapter = await use($);
+    if (adapter.enabled) quiet(adapter.stop(lastReplyOf(e)));
+    return next(e);
+  });
+
+  on('classic.StopFailure', async ($, e, next) => {
+    const adapter = await use($);
+    if (adapter.enabled) quiet(adapter.stop());
+    return next(e);
+  });
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e);
@@ -92,7 +140,7 @@ export function register(on: On): void {
     // pane showing "busy" through that wait is what this mod exists to prevent.
     if (e.tool_use_id) {
       const adapter = await use($);
-      if (adapter.enabled) quiet(adapter.check(verdict.decision));
+      if (adapter.enabled) quiet(adapter.check(verdict.decision, e.tool_use_id));
     }
     return verdict;
   });
@@ -102,9 +150,11 @@ export function register(on: On): void {
     // The question UI waits on the person for as long as it is open, so the
     // pane blocks before the tool runs, not after it answers. $.ui.ask from
     // another Mod is the same AskUserQuestion tool.call.
-    if (adapter.enabled && e.tool === 'AskUserQuestion') quiet(adapter.asking());
+    if (adapter.enabled && e.tool === 'AskUserQuestion') {
+      quiet(adapter.asking(e.tool, e.tool_use_id));
+    }
     const result = await next(e);
-    if (adapter.enabled) quiet(adapter.toolDone());
+    if (adapter.enabled) quiet(adapter.toolDone(e.tool, e.tool_use_id));
     return result;
   });
 
@@ -114,6 +164,31 @@ export function register(on: On): void {
   on('classic.Notification', async ($, e, next) => {
     const adapter = await use($);
     if (adapter.enabled) quiet(adapter.prompted(e.message));
+    return next(e);
+  });
+
+  // The same clear as tool.call, for the tool calls whose hook result is lost.
+  on('classic.PostToolUse', async ($, e, next) => {
+    const adapter = await use($);
+    const { tool, toolUseId } = callOf(e);
+    if (adapter.enabled) quiet(adapter.toolDone(tool, toolUseId));
+    return next(e);
+  });
+
+  on('classic.PostToolUseFailure', async ($, e, next) => {
+    const adapter = await use($);
+    const { tool, toolUseId } = callOf(e);
+    if (adapter.enabled) quiet(adapter.toolDone(tool, toolUseId));
+    return next(e);
+  });
+
+  // A denied call never runs, so no PostToolUse arrives: the decision is made,
+  // and the prompt this call was holding is over. Only this call's, though —
+  // another prompt may still be waiting on the same person.
+  on('classic.PermissionDenied', async ($, e, next) => {
+    const adapter = await use($);
+    const { tool, toolUseId } = callOf(e);
+    if (adapter.enabled) quiet(adapter.toolDone(tool, toolUseId));
     return next(e);
   });
 

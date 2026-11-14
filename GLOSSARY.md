@@ -27,3 +27,15 @@ _Avoid_: screen detection, text detection
 **Hook state（钩子状态）**:
 仅由 CodeBuddy 会话事件推出的状态，不读屏幕。
 _Avoid_: real state, event state
+
+**Turn fact（轮次事实）**:
+维护面板状态用的两个事实：这一轮是否在跑（`busy`），以及有没有还在等人的决定（`waiting`）。状态是它们的函数，不是事件流的流水账。
+_Avoid_: current state, turn flag
+
+**Witness（见证）**:
+能翻动一个事实的事件。只有保证每次都会发生的事件才算见证（`classic.UserPromptSubmit`、`classic.Stop`）；采样得到的事件（`turn.start`、`turn.complete`）只能作备份。
+_Avoid_: signal, trigger, source
+
+**Wait（等待项）**:
+一条还欠着人的决定，按发起它的工具调用（`tool_use_id`）记着，值就是面板上显示的那句话。由该调用结算、权限被拒或轮末清除。
+_Avoid_: pending, blocker, queue entry

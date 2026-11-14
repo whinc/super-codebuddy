@@ -158,11 +158,17 @@ function arg(argv, flag) {
   return argv[argv.indexOf(flag) + 1];
 }
 
-function harness({ env = ENV, snapshot = '', read } = {}) {
+function harness({ env = ENV, snapshot = '', read, send } = {}) {
   const spawned = [];
   const deps = {
     now: () => 1000,
-    spawn: (binary, args) => spawned.push({ binary, args }),
+    send:
+      send ||
+      ((binary, args) => {
+        spawned.push({ binary, args });
+        return Promise.resolve(true);
+      }),
+    sleep: async () => {},
     readSnapshot:
       read || (async () => (typeof snapshot === 'function' ? snapshot() : snapshot)),
   };
@@ -316,9 +322,9 @@ test('reports a subagent permission prompt from the tool.check hook', async () =
 
 test('blocks only when the permission verdict asks', async () => {
   const { spawned, adapter } = await harness();
-  await adapter.check('allow');
+  await adapter.check('allow', 'toolu_1');
   assert.deepEqual(spawned, []);
-  await adapter.check('ask');
+  await adapter.check('ask', 'toolu_2');
   assert.equal(arg(spawned[0].args, '--state'), 'blocked');
   assert.equal(arg(spawned[0].args, '--message'), 'waiting for permission');
 });
@@ -516,6 +522,115 @@ test('returns to idle after a question asked outside a turn', async () => {
   ]);
 });
 
+test('stop clears a block whose tool never settles', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnStart();
+  await adapter.check('ask', 'Bash', 'toolu_1');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+
+  await adapter.stop();
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle', 'the turn end clears the wait');
+});
+
+test('clears only the prompt that was answered', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnStart();
+  await adapter.check('ask', 'Bash', 'toolu_1');
+  await adapter.check('ask', 'Edit', 'toolu_2');
+  await adapter.toolDone('Bash', 'toolu_1');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked', 'the other prompt still waits');
+
+  await adapter.toolDone('Edit', 'toolu_2');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working');
+});
+
+test('reports a new message even when the state does not change', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnStart();
+  await adapter.check('ask', 'toolu_1');
+  await adapter.asking('AskUserQuestion', 'toolu_q');
+  assert.equal(spawned.length, 2, 'the earlier wait keeps the pane text');
+
+  await adapter.toolDone(undefined, 'toolu_1');
+  assert.equal(spawned.length, 3, 'the remaining wait gets its words to the pane');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'answer the question');
+});
+
+test('clears a notice by the call id it names', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnStart();
+  await adapter.prompted('needs your permission to use Bash');
+
+  await adapter.toolDone('Bash', 'toolu_1');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'the settling call clears the notice');
+});
+
+test('stop reads the reply the turn ended on', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.submit();
+  await adapter.stop('要我把 P2 也加上吗？');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked', 'no turn.complete needed');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'answer the question');
+
+  const second = await harness();
+  await second.adapter.submit();
+  await second.adapter.stop('已改完 61 行，列名统一为「描述」。');
+  assert.equal(arg(second.spawned.at(-1).args, '--state'), 'idle');
+});
+
+test('reports working from the submitted prompt on, never idle mid-turn', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.sessionStart('session-abc');
+  await adapter.submit();
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'no turn.start needed');
+
+  await adapter.toolDone();
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'a tool settling is not a turn end');
+});
+
+test('the next prompt clears a turn-end prose question', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnComplete({ reason: 'answer', answer: '要我把 P2 也加上吗？' });
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+
+  await adapter.submit();
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working');
+});
+
+test('resends a dropped report until herdr accepts it', async () => {
+  let attempts = 0;
+  const { adapter } = await harness({
+    send: async () => {
+      attempts++;
+      return attempts >= 3;
+    },
+  });
+  await adapter.turnStart();
+  await new Promise(setImmediate);
+  assert.equal(attempts, 3, 'the state is resent until it lands');
+});
+
+test('retries a failed send and keeps the state unconfirmed', async () => {
+  let attempts = 0;
+  let accept = false;
+  const { adapter } = await harness({
+    send: async () => {
+      attempts++;
+      return accept;
+    },
+  });
+  await adapter.turnStart();
+  await new Promise(setImmediate);
+  const afterGiveUp = attempts;
+  assert.equal(afterGiveUp, 3, 'three attempts, then give up');
+
+  accept = true;
+  await adapter.turnStart();
+  await new Promise(setImmediate);
+  assert.equal(attempts, afterGiveUp + 1, 'the next event resends the same state');
+});
+
 test('keeps the resume command when session start hits a blocker', async () => {
   const { spawned, adapter } = await harness({ snapshot: PERMISSION_EN });
   await adapter.sessionStart('session-abc');
@@ -575,6 +690,67 @@ test('register blocks on the notification before the question tool runs', async 
   assert.equal(seen.message, 'needs your permission to use AskUserQuestion', 'passes through');
 });
 
+test('register clears the waiting call by its tool_use_id', async () => {
+  const { calls, handlers, $ } = await registerHarness({ tag: 'post-tool' });
+  await handlers['turn.start']($, {}, async e => e);
+  await handlers['tool.check']($, { tool: 'Bash', tool_use_id: 'toolu_1' }, async () => ({
+    decision: 'ask',
+  }));
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'blocked');
+
+  await handlers['classic.PostToolUse'](
+    $,
+    { tool_name: 'Bash', tool_use_id: 'toolu_1' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'working', 'the call that asked settled');
+});
+
+test('register clears only the denied call', async () => {
+  const { calls, handlers, $ } = await registerHarness({ tag: 'denied' });
+  await handlers['turn.start']($, {}, async e => e);
+  await handlers['tool.check']($, { tool: 'Bash', tool_use_id: 'toolu_1' }, async () => ({
+    decision: 'ask',
+  }));
+  await handlers['tool.check']($, { tool: 'Edit', tool_use_id: 'toolu_2' }, async () => ({
+    decision: 'ask',
+  }));
+  await new Promise(setImmediate);
+
+  await handlers['classic.PermissionDenied'](
+    $,
+    { tool_name: 'Bash', tool_use_id: 'toolu_1' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'blocked', 'the other prompt still waits');
+
+  await handlers['classic.PostToolUseFailure'](
+    $,
+    { tool_name: 'Edit', tool_use_id: 'toolu_2' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'working');
+});
+
+test('register reads the reply off the Stop hook', async () => {
+  const { calls, handlers, $ } = await registerHarness({ tag: 'stop-reply' });
+  await handlers['classic.UserPromptSubmit']($, {}, async e => e);
+  await new Promise(setImmediate);
+
+  await handlers['classic.Stop'](
+    $,
+    { stop_hook_active: false, last_assistant_message: '要我把 P2 也加上吗？' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'blocked');
+  assert.equal(arg(calls.at(-1).argv, '--message'), 'answer the question');
+});
+
 test('hooks stay inside the Mod sandbox', () => {
   const dir = path.join(__dirname, 'plugin', 'hooks');
   for (const name of readdirSync(dir).filter(n => n.endsWith('.ts'))) {
@@ -597,7 +773,9 @@ test('register wires every lifecycle event', async () => {
   const events = [];
   register(pattern => events.push(pattern));
   assert.deepEqual(events, [
-    'session.start', 'turn.start', 'turn.complete',
-    'tool.check', 'tool.call', 'classic.Notification', 'session.end',
+    'session.start', 'classic.UserPromptSubmit', 'turn.start', 'turn.complete',
+    'classic.Stop', 'classic.StopFailure', 'tool.check', 'tool.call',
+    'classic.Notification', 'classic.PostToolUse', 'classic.PostToolUseFailure',
+    'classic.PermissionDenied', 'session.end',
   ]);
 });
