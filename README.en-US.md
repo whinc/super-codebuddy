@@ -50,7 +50,7 @@ For how it decides and where the edges are, see [docs/how-it-works.md](docs/how-
 
 - It does not add CodeBuddy to `herdr agent start --kind`: that needs a Herdr binary update, and the [upstream PR](https://github.com/herdrdev/herdr/pull/4932) is unmerged.
 - Only sessions started inside a Herdr pane are covered; CodeBuddy in a plain terminal reports nothing.
-- `blocked` mostly comes from the engine's pre-wait notification; a prose question at the end of a turn is guessed from the bottom snapshot (word list in `plugin/hooks/detect.ts`, so an unusual phrasing is missed). The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
+- `blocked` mostly comes from the engine's pre-wait notification; a prose question at the end of a turn comes from `turn.complete.answer`, the engine's reply text, so no screen read is involved (word list in `plugin/hooks/detect.ts`, so an unusual phrasing is missed). The Chinese approval strings are preventive, since the 2.183.0 TUI is English.
 - Experimental: a Herdr or CodeBuddy Mod API change can break it.
 
 ## Development

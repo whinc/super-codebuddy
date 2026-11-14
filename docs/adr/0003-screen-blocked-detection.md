@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. The "no polling" part was superseded by ADR 0004, then by ADR 0005; the
-idle-time fallback remains. ADR 0006 adds the prose sign-off rule.
+idle-time fallback remains. ADR 0006 added the prose sign-off rule; ADR 0007 moved it to the reply text.
 
 ## Context
 

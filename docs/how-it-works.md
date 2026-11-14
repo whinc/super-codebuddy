@@ -14,7 +14,7 @@ Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进
 | `tool.call` → `AskUserQuestion` | `blocked`：模型自己的提问在等人回答，带 `--message answer the question`；非 PTC 会话在这一步就拦住 |
 | `classic.Notification` → `permission_prompt` | `blocked`：引擎在等待前发出 `needs your permission to use <tool>`；PTC 提问、计划批准都在这时拦住，回答或取消后由工具结算报回 |
 | `tool.call` 结算 | 轮内 `working`；轮外 `idle`：空闲时别的 Mod 用 `$.ui.ask` 提问，答完回空闲 |
-| `turn.complete` | `idle`；读屏命中阻塞界面则报 `blocked` |
+| `turn.complete` | `idle`：`reason` 为 `answer` 且回复收尾在提问（`answer` 字段）则报 `blocked`（`answer the question`）；轮末不读屏 |
 | `session.end`（`clear`、`resume`） | `idle`：进程比这次对话活得久；读屏命中则报 `blocked` |
 | `session.end`（其他情况） | 释放 agent |
 
@@ -24,9 +24,11 @@ Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进
 
 Herdr 的检测清单不能直接给 CodeBuddy 用：官方文档写明，新增一个它不认识的 agent 仍需要 Herdr 二进制更新，本地 manifest 只补规则。所以这一步放在 Mod 里。
 
-每次准备报 `idle`，Mod 用 `herdr pane read <pane> --source detection` 读一次 Herdr 屏幕检测用的底部快照，再跑一组严格规则：权限确认、`AskUserQuestion`、计划批准（`Ready to code?`），以及轮末的文字提问（`✔ Worked for` 上方三行里出现问号或「回复/请确认/要不要/逐条改」这类收尾）。轮末这一条先等 300ms 再读：读早了会读到上一轮的收尾，把已经回答过的问题再报一次；未命中还会再等 300ms 补读一次。规则要求标题和选项行同时出现在面板底部；转写区里的历史文字不算。命中就报 `blocked` 并带 `--message`（`waiting for permission`、`answer the question`、`approve the plan`、`approve the workflow`），没命中、读失败或 Herdr 版本太旧都回退 `idle`。
+每次准备报 `idle`（`session.start`，以及 `session.end` 的 `clear`／`resume`），Mod 用 `herdr pane read <pane> --source detection` 读一次 Herdr 屏幕检测用的底部快照，只跑对话框规则：权限确认、`AskUserQuestion`、计划批准（`Ready to code?`）、工作流确认。规则要求标题和选项行同时出现在面板底部；转写区里的历史文字不算。命中就报 `blocked` 并带 `--message`（`waiting for permission`、`answer the question`、`approve the plan`、`approve the workflow`），没命中、读失败或 Herdr 版本太旧都回退 `idle`。轮末不读屏：面板上的自由文本永远不算阻塞。每次读超过 1.5 秒算失败，失败后这个进程不再读屏。中文规则按现有审批文案尽力匹配；2.183.0 的 TUI 本身是英文，中文属于预防性覆盖。
 
-每次读超过 1.5 秒算失败，失败后这个进程不再读屏。中文规则按现有审批文案尽力匹配；2.183.0 的 TUI 本身是英文，中文属于预防性覆盖。
+## 轮末文字提问
+
+`turn.complete` 的输入带 `reason` 和 `answer`：`answer` 是本轮最终的可见回复文本。`reason` 为 `answer` 时，Mod 只看 `answer` 最后三行；以问号收尾，或命中「回复／请确认／确认后／逐条改」这类词表，就报 `blocked`（`answer the question`）。这里不读屏：任务行、TUI 文案和滚动历史都不进这条判定，后台任务还在跑时也不会误报；`aborted`、`refusal`、`error` 收尾一律回 `idle`。
 
 ## 等待前的通知
 
@@ -36,7 +38,7 @@ PTC 会话里模型提问由 REPL 工具内部的 AskService 承接：引擎先�
 
 ## 为什么开销低
 
-钩子跑在 CLI 进程里，每个事件都不另外启动 shell 或 Node 钩子进程。上报按状态去重，一轮里五十次工具调用只发一次 `working` 和一次 `idle`。等待前的通知直接来自引擎事件，轮内不再读屏；只有每次 idle 转变读一次检测快照（轮末未命中再读一次，各约 250ms），读屏和上报都在后台，这一轮从不等待 Herdr。
+钩子跑在 CLI 进程里，每个事件都不另外启动 shell 或 Node 钩子进程。上报按状态去重，一轮里五十次工具调用只发一次 `working` 和一次 `idle`。等待前的通知直接来自引擎事件，轮内不再读屏；只有每次 idle 转变读一次检测快照（约 250ms；轮末不读），读屏和上报都在后台，这一轮从不等待 Herdr。
 
 用 CodeBuddy 的 hooks（事件触发的外部脚本）实现同一件事，每个事件都要起一个 Node 进程，再由它调用 herdr，一轮五十次工具调用就是上百次进程启动。这个 Mod 只在可见状态变化时 spawn 一次 herdr，外加每次 idle 转变一次读屏。
 
@@ -47,3 +49,5 @@ PTC 会话里模型提问由 REPL 工具内部的 AskService 承接：引擎先�
 - [0003-screen-blocked-detection](adr/0003-screen-blocked-detection.md)
 - [0004-poll-while-working](adr/0004-poll-while-working.md)（已被 0005 取代）
 - [0005-prompt-notification](adr/0005-prompt-notification.md)
+- [0006-prose-question](adr/0006-prose-question.md)（已被 0007 取代）
+- [0007-turn-answer-not-screen](adr/0007-turn-answer-not-screen.md)

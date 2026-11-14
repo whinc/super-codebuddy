@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Extends ADR 0003.
+Superseded by [0007](0007-turn-answer-not-screen.md). Extends ADR 0003.
 
 ## Context
 

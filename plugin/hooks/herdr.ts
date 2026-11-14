@@ -8,7 +8,7 @@
  * Contract: https://herdr.dev/tui/docs/add-herdr-support/
  */
 
-import { classify, type Hit } from './detect.ts';
+import { asksInReply, classify, type Hit } from './detect.ts';
 
 export type HerdrState = 'idle' | 'working' | 'blocked';
 
@@ -21,8 +21,14 @@ export type HerdrEnv = {
 export type Deps = {
   spawn(binary: string, args: string[]): void;
   readSnapshot(): Promise<string>;
-  sleep(ms: number): Promise<void>;
   now(): number;
+};
+
+/** The part of turn.complete this adapter reads. */
+export type TurnEnd = {
+  agentId?: string;
+  reason: string;
+  answer: string;
 };
 
 type Entry = {
@@ -40,8 +46,6 @@ const SESSION_ID = /^[a-zA-Z0-9][a-zA-Z0-9:_-]*$/;
 // shortcut: the engine's English prompt copy is the only discriminator; upgrade
 // to a typed prompt event when one lands.
 const PERMISSION_PREFIX = 'needs your permission to use ';
-/** The reply can paint after turn.complete: one wait, then one retry. */
-const RETRY_MS = 300;
 
 export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   const pane = env.HERDR_PANE_ID;
@@ -91,21 +95,14 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
    * wins; a miss, a failed read, or an older Herdr without `detection` keeps
    * the idle report. Hook-reported blocked/working are never touched here.
    *
-   * A turn-end read waits one frame first: the reply and its banner paint
-   * after turn.complete, so an immediate read can still show the previous
-   * turn's sign-off and block on a question that is already answered.
+   * Only dialogs are read here: a turn-end prose question comes from the
+   * engine's reply text, so the pane is never consulted for it.
    */
-  async function idle(entry: Entry, turnEnd = false): Promise<void> {
+  async function idle(entry: Entry): Promise<void> {
     if (!enabled || screenBroken || !pane) return report(entry);
     const mine = ++epoch;
     try {
-      if (turnEnd) await deps.sleep(RETRY_MS);
-      let hit = classify(await deps.readSnapshot());
-      if (!hit && turnEnd) {
-        await deps.sleep(RETRY_MS);
-        if (mine !== epoch) return;
-        hit = classify(await deps.readSnapshot());
-      }
+      const hit = classify(await deps.readSnapshot());
       if (mine !== epoch) return;
       return report(hit ? { ...entry, state: 'blocked', message: hit.message } : entry);
     } catch {
@@ -133,10 +130,19 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
       return report({ state: 'working', sessionId: changed ? sessionId : undefined });
     },
 
-    turnComplete(agentId?: string) {
-      if (agentId) return Promise.resolve();
+    /**
+     * The event carries the turn's final reply text. A reply that signs off by
+     * asking is the only prose block, and it needs no pane read: task rows and
+     * TUI chrome never reach this text.
+     */
+    turnComplete(e: TurnEnd) {
+      if (e.agentId) return Promise.resolve();
       turnActive = false;
-      return idle({ state: 'idle' }, true);
+      epoch++;
+      if (e.reason === 'answer' && asksInReply(e.answer)) {
+        return report({ state: 'blocked', message: 'answer the question' });
+      }
+      return report({ state: 'idle' });
     },
 
     /**

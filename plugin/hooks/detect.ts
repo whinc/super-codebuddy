@@ -53,10 +53,7 @@ const PERMISSION_TITLES = [
 /** The workflow confirmation hides its title above the last rule. */
 const WORKFLOW_TITLE = /run a dynamic workflow\?/i;
 
-/** The banner CodeBuddy prints under a reply whose turn has ended. */
-const TURN_END = /^\s*[✔✓]\s+Worked for\b/;
-
-/** How many closing lines above the banner count as the reply's sign-off. */
+/** How many closing lines of the reply count as its sign-off. */
 const CLOSING_LINES = 3;
 
 /** A sign-off that asks the person to answer or decide. */
@@ -115,23 +112,20 @@ function flatten(text: string): string {
     .trim();
 }
 
-/** The sign-off of the last finished reply, above its turn-end banner. */
-function signOff(snapshot: string): string {
-  const lines = snapshot.replace(/\r\n?/g, '\n').split('\n');
-  let end = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (TURN_END.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  if (end < 0) return '';
-  const above: string[] = [];
-  for (let i = end - 1; i >= 0 && above.length < CLOSING_LINES; i--) {
-    const line = clean(lines[i]);
-    if (line !== '' && !HORIZONTAL_RULE.test(line)) above.unshift(line);
-  }
-  return above.join(' ');
+/**
+ * True when the reply's closing lines ask the person to answer or decide.
+ *
+ * The engine hands the reply text to `turn.complete`, so this reads the source
+ * text: pane chrome, task rows and transcript history cannot reach it.
+ */
+export function asksInReply(answer: string): boolean {
+  const lines = answer
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter(line => line.trim() !== '');
+  if (lines.length === 0) return false;
+  const tail = lines.slice(-CLOSING_LINES).join(' ').replace(/\s+/g, ' ').trim();
+  return /[?？]$/.test(tail) || PROSE_ASK.test(tail);
 }
 
 function hasOption(text: string): boolean {
@@ -186,11 +180,5 @@ export function classify(snapshot: string): Hit | null {
     (QUESTION_CANCEL.test(bottomFlat) || QUESTION_SPECIAL.test(bottomFlat)) &&
     (bottomLines.some(line => /[?？]\s*$/.test(line)) || QUESTION_SPECIAL.test(bottomFlat));
 
-  if (asks && options >= 2) return { id: 'question', message: 'answer the question' };
-
-  // shortcut: a prose sign-off is a text guess, so only its last lines count;
-  // upgrade to an engine signal if turn.complete ever carries the reply.
-  const tail = signOff(snapshot);
-  const prose = tail !== '' && (/[?？]$/.test(tail) || PROSE_ASK.test(tail));
-  return prose ? { id: 'prose-question', message: 'answer the question' } : null;
+  return asks && options >= 2 ? { id: 'question', message: 'answer the question' } : null;
 }

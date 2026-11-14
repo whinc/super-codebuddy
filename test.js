@@ -15,16 +15,19 @@ const ENV = {
   HERDR_BIN_PATH: '/fake/herdr',
 };
 
+/** A turn that ended without a reply to examine. */
+const END = { reason: 'answer', answer: '' };
+
 const TRUST_FIXTURE = readFileSync(
   path.join(__dirname, 'test', 'fixtures', 'trust.txt'),
   'utf8',
 );
-const PROSE_QUESTION = readFileSync(
+const SCREEN_PROSE = readFileSync(
   path.join(__dirname, 'test', 'fixtures', 'prose-question.txt'),
   'utf8',
 );
-const PROSE_DONE = readFileSync(
-  path.join(__dirname, 'test', 'fixtures', 'prose-done.txt'),
+const TURN_END_TASK = readFileSync(
+  path.join(__dirname, 'test', 'fixtures', 'turn-end-task.txt'),
   'utf8',
 );
 
@@ -155,11 +158,10 @@ function arg(argv, flag) {
   return argv[argv.indexOf(flag) + 1];
 }
 
-function harness({ env = ENV, snapshot = '', read, sleep } = {}) {
+function harness({ env = ENV, snapshot = '', read } = {}) {
   const spawned = [];
   const deps = {
     now: () => 1000,
-    sleep: sleep || (async () => {}),
     spawn: (binary, args) => spawned.push({ binary, args }),
     readSnapshot:
       read || (async () => (typeof snapshot === 'function' ? snapshot() : snapshot)),
@@ -213,7 +215,7 @@ test('does nothing outside a herdr pane', async () => {
   const { spawned, adapter } = await harness({ env: {} });
   assert.equal(adapter.enabled, false);
   await adapter.turnStart();
-  await adapter.turnComplete();
+  await adapter.turnComplete(END);
   await adapter.sessionEnd('prompt_input_exit');
   assert.deepEqual(spawned, []);
 });
@@ -224,7 +226,7 @@ test('does nothing without the herdr binary', async () => {
   });
   assert.equal(adapter.enabled, false);
   await adapter.turnStart();
-  await adapter.turnComplete();
+  await adapter.turnComplete(END);
   assert.deepEqual(spawned, []);
 });
 
@@ -233,14 +235,14 @@ test('skips reports that do not change the state', async () => {
   await adapter.turnStart();
   await adapter.turnStart();
   assert.equal(spawned.length, 1);
-  await adapter.turnComplete();
+  await adapter.turnComplete(END);
   assert.equal(spawned.length, 2);
 });
 
 test('reports an increasing sequence', async () => {
   const { spawned, adapter } = await harness();
   await adapter.turnStart();
-  await adapter.turnComplete();
+  await adapter.turnComplete(END);
   const seq = spawned.map(({ args }) => Number(arg(args, '--seq')));
   assert.ok(seq[1] > seq[0], 'every report carries a higher seq');
 });
@@ -269,7 +271,7 @@ test('releases the pane on a real exit and stays idle on clear', async () => {
 test('ignores subagent turns', async () => {
   const { spawned, adapter } = await harness();
   await adapter.turnStart(undefined, 'agent-1');
-  await adapter.turnComplete('agent-1');
+  await adapter.turnComplete({ agentId: 'agent-1', reason: 'answer', answer: '' });
   assert.deepEqual(spawned, [], 'a subagent turn does not move the pane');
 });
 
@@ -375,64 +377,67 @@ test('detect: leaves idle screens and unrelated menus alone', async () => {
   assert.equal(classify(''), null);
 });
 
-test('reads the detection snapshot before reporting idle', async () => {
-  const { spawned, adapter } = await harness({ snapshot: PERMISSION_EN });
-  await adapter.turnComplete();
-  const last = spawned.at(-1).args;
-  assert.equal(arg(last, '--state'), 'blocked');
-  assert.equal(arg(last, '--message'), 'waiting for permission');
-
-  const second = await harness({ snapshot: IDLE });
-  await second.adapter.turnComplete();
-  assert.equal(arg(second.spawned.at(-1).args, '--state'), 'idle');
-});
-
-test('detect: a reply that signs off by asking is blocked', async () => {
-  const { classify } = await import(DETECT);
-  assert.equal(classify(PROSE_QUESTION).id, 'prose-question');
-  assert.equal(classify(PROSE_QUESTION).message, 'answer the question');
-  assert.equal(classify(PROSE_DONE), null, 'a summary sign-off is idle');
-});
-
-test('waits for the frame before the turn-end read', async () => {
-  const sleeps = [];
-  let reads = 0;
-  const { adapter } = await harness({
-    sleep: async ms => {
-      sleeps.push(ms);
-    },
-    read: async () => {
-      reads++;
-      return PROSE_QUESTION;
-    },
-  });
-  await adapter.turnComplete();
-  assert.deepEqual(sleeps, [300], 'one frame wait before reading');
-  assert.equal(reads, 1, 'a hit needs no second read');
-
-  sleeps.length = 0;
-  await adapter.sessionStart('session-abc');
-  assert.deepEqual(sleeps, [], 'no wait outside a turn end');
-});
-
-test('retries the read once when the reply has not painted yet', async () => {
+test('turn end reports idle without reading the screen', async () => {
   let reads = 0;
   const { spawned, adapter } = await harness({
-    read: async () => (++reads === 1 ? PROSE_DONE : PROSE_QUESTION),
+    read: async () => {
+      reads++;
+      return TURN_END_TASK;
+    },
   });
-  await adapter.turnComplete();
-  assert.equal(reads, 2, 'one retry after the miss');
+  await adapter.turnComplete({ reason: 'answer', answer: '已跑完 12 个测试，全部通过。' });
+  assert.equal(reads, 0, 'the reply text comes from the event, not the pane');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle');
+});
+
+test('detect: prose on the screen is not a blocker', async () => {
+  const { classify } = await import(DETECT);
+  // The reported false block: a running task row above the turn-end banner.
+  assert.equal(classify(TURN_END_TASK), null, 'task rows are not read as a sign-off');
+  assert.equal(classify(SCREEN_PROSE), null, 'a reply on screen is not a dialog either');
+});
+
+test('detect: the reply text decides the prose question', async () => {
+  const { asksInReply } = await import(DETECT);
+  assert.equal(asksInReply('两个方案都行。\n\n回「accept all」或逐条改。'), true);
+  assert.equal(asksInReply('用「作用」还是「描述」？\n'), true, 'a trailing question mark counts');
+  assert.equal(asksInReply('已改完 61 行，列名统一为「描述」。'), false);
+  assert.equal(asksInReply(''), false);
+});
+
+test('blocks at turn end when the reply asks', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnStart();
+  await adapter.turnComplete({ reason: 'answer', answer: '要我把 P2 也加上吗？' });
   const last = spawned.at(-1).args;
   assert.equal(arg(last, '--state'), 'blocked');
   assert.equal(arg(last, '--message'), 'answer the question');
 });
 
-test('does not retry outside a turn end', async () => {
+test('keeps a non-answer turn idle', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.turnComplete({ reason: 'aborted', answer: '要我继续吗？' });
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle', 'no block on an aborted turn');
+});
+
+test('reads the detection snapshot before reporting idle on session start', async () => {
+  const { spawned, adapter } = await harness({ snapshot: PERMISSION_EN });
+  await adapter.sessionStart('session-abc');
+  const last = spawned.at(-1).args;
+  assert.equal(arg(last, '--state'), 'blocked');
+  assert.equal(arg(last, '--message'), 'waiting for permission');
+
+  const second = await harness({ snapshot: IDLE });
+  await second.adapter.sessionStart('session-abc');
+  assert.equal(arg(second.spawned.at(-1).args, '--state'), 'idle');
+});
+
+test('reads the snapshot once when reporting idle', async () => {
   let reads = 0;
   const { adapter } = await harness({
     read: async () => {
       reads++;
-      return PROSE_DONE;
+      return IDLE;
     },
   });
   await adapter.sessionStart('session-abc');
@@ -447,12 +452,10 @@ test('falls back to idle when the screen read fails, and does not retry', async 
       throw new Error('pane read failed');
     },
   });
-  await adapter.turnComplete();
+  await adapter.sessionStart('session-abc');
   assert.equal(arg(spawned.at(-1).args, '--state'), 'idle');
-  await adapter.turnStart();
-  await adapter.turnComplete();
+  await adapter.sessionStart('session-abc');
   assert.equal(reads, 1, 'the failed read is remembered for the process');
-  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle');
 });
 
 test('drops a slow screen read once a newer state event lands', async () => {
@@ -466,7 +469,7 @@ test('drops a slow screen read once a newer state event lands', async () => {
       });
     },
   });
-  const pending = adapter.turnComplete();
+  const pending = adapter.sessionStart('session-abc');
   await adapter.turnStart();
   release(PERMISSION_EN);
   await pending;
@@ -525,9 +528,8 @@ test('keeps the resume command when session start hits a blocker', async () => {
 
 test('register reads the detection source with a short timeout', async () => {
   const { calls, handlers, $ } = await registerHarness({ tag: 'screen-read' });
-  await handlers['turn.complete']($, {}, async e => e);
-  // The turn-end read waits one frame before touching the snapshot.
-  await new Promise(resolve => setTimeout(resolve, 350));
+  await handlers['session.start']($, {}, async e => e);
+  await new Promise(setImmediate);
 
   const read = calls.find(({ argv }) => argv[1] === 'pane' && argv[2] === 'read');
   assert.ok(read, 'the adapter asked for the pane snapshot');
@@ -537,6 +539,23 @@ test('register reads the detection source with a short timeout', async () => {
   const report = calls.find(({ argv }) => argv[2] === 'report-agent');
   assert.equal(arg(report.argv, '--state'), 'blocked');
   assert.equal(arg(report.argv, '--message'), 'waiting for permission');
+});
+
+test('register reports the turn-end reply text', async () => {
+  const { calls, handlers, $ } = await registerHarness({ tag: 'turn-answer' });
+  await handlers['turn.start']($, {}, async e => e);
+  await new Promise(setImmediate);
+  calls.length = 0;
+
+  await handlers['turn.complete'](
+    $,
+    { reason: 'answer', answer: '要我把 P2 也加上吗？' },
+    async e => e,
+  );
+  await new Promise(setImmediate);
+  assert.equal(arg(calls.at(-1).argv, '--state'), 'blocked');
+  assert.equal(arg(calls.at(-1).argv, '--message'), 'answer the question');
+  assert.ok(calls.every(({ argv }) => argv[2] !== 'read'), 'no pane read at turn end');
 });
 
 test('register blocks on the notification before the question tool runs', async () => {

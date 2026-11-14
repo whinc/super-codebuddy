@@ -27,7 +27,6 @@ function load($: EngineInterface): Promise<Adapter> {
         env,
         deps: {
           now: () => Date.now(),
-          sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
           spawn(binary, args) {
             if (!engine) return;
             void engine.process.run([binary, ...args]).catch(() => {});
@@ -78,7 +77,7 @@ export function register(on: On): void {
 
   on('turn.complete', async ($, e, next) => {
     const adapter = await use($);
-    if (adapter.enabled) quiet(adapter.turnComplete(e.agentId));
+    if (adapter.enabled) quiet(adapter.turnComplete(e));
     return next(e);
   });
 

@@ -50,7 +50,7 @@ Herdr 给自己认识的 agent 报状态，CodeBuddy 不在 `herdr agent start -
 
 - 不会把 CodeBuddy 加进 `herdr agent start --kind`：那需要 Herdr 二进制更新，[上游 PR](https://github.com/herdrdev/herdr/pull/4932) 还没合并。
 - 只有在 Herdr 面板里启动的会话有效，普通终端里的 CodeBuddy 不上报。
-- `blocked` 主要来自引擎在等待前发出的通知，轮末的文字提问靠底部快照猜（词表在 `plugin/hooks/detect.ts`，说法太隐晦会漏）；中文审批文案属预防性覆盖，2.183.0 的 TUI 本身是英文。
+- `blocked` 主要来自引擎在等待前发出的通知；轮末的文字提问读 `turn.complete.answer`（引擎给的回复原文，不读屏；词表在 `plugin/hooks/detect.ts`，说法太隐晦会漏）。中文审批文案属预防性覆盖，2.183.0 的 TUI 本身是英文。
 - 实验性：Herdr 或 CodeBuddy Mod API 变动都可能让它失效。
 
 ## 开发
