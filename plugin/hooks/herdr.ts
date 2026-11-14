@@ -61,6 +61,16 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
   const enabled = env.HERDR_ENV === '1' && !!pane && !!binary;
 
   let seq = deps.now();
+  /**
+   * Herdr keeps the highest seq per pane and source. Seeding from the clock and
+   * topping up on every report lets a process that started earlier win the pane
+   * back: a nested `codebuddy -p` in the same pane starts from a later clock,
+   * and a plain counter would stay below that base for the rest of the session.
+   */
+  function nextSeq(): string {
+    seq = Math.max(seq + 1, deps.now());
+    return String(seq);
+  }
   let lastSessionId: string | undefined;
 
   /**
@@ -109,7 +119,7 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
       pane as string,
       '--source', SOURCE,
       '--agent', AGENT,
-      '--seq', String(++seq),
+      '--seq', nextSeq(),
     ];
     if (!entry.release) args.push('--state', entry.state as string);
     if (entry.message) args.push('--message', entry.message);

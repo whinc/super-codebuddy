@@ -158,10 +158,10 @@ function arg(argv, flag) {
   return argv[argv.indexOf(flag) + 1];
 }
 
-function harness({ env = ENV, snapshot = '', read, send } = {}) {
+function harness({ env = ENV, snapshot = '', read, send, now = () => 1000 } = {}) {
   const spawned = [];
   const deps = {
-    now: () => 1000,
+    now,
     send:
       send ||
       ((binary, args) => {
@@ -251,6 +251,24 @@ test('reports an increasing sequence', async () => {
   await adapter.turnComplete(END);
   const seq = spawned.map(({ args }) => Number(arg(args, '--seq')));
   assert.ok(seq[1] > seq[0], 'every report carries a higher seq');
+});
+
+test('a later report outranks another process on the same pane', async () => {
+  let clock = 1000;
+  const earlier = await harness({ now: () => clock });
+  await earlier.adapter.turnStart();
+
+  clock = 5000;
+  const nested = await harness({ now: () => clock });
+  await nested.adapter.turnStart();
+  const takenOver = Number(arg(nested.spawned.at(-1).args, '--seq'));
+
+  clock = 6000;
+  await earlier.adapter.turnComplete(END);
+  assert.ok(
+    Number(arg(earlier.spawned.at(-1).args, '--seq')) > takenOver,
+    'the process that was there first wins the pane back',
+  );
 });
 
 test('reports the session and its resume command on session start', async () => {

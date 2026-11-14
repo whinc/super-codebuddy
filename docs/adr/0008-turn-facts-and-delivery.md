@@ -86,6 +86,17 @@ fire-and-forget: the retries run detached, so a hook never waits on herdr.
   lower.
 - A leaked `waiting` entry is cleared by `Stop`; a leaked `busy` never resolves
   to `idle` without a turn end, which is the safe direction.
+- `--seq` is seeded from the clock and topped up on every report
+  (`max(seq + 1, now)`), not a plain counter. A `codebuddy -p` started inside
+  a pane inherits `HERDR_*` and reports to the same pane; with a counter, the
+  process that started first could never outrank it again and its pane would
+  stay frozen on the nested process's last state. Seeded from the clock, the
+  latest report wins whichever process sends it. While the nested process runs
+  it still owns the pane — a residue of sharing one pane, not of this model.
+- Headless (`-p`) sessions emit neither `session.start` nor `session.end` on
+  a clean exit: no pane read, and the resume command arrives with the first
+  `turn.start` instead. Herdr panes run the TUI, so this only matters to
+  someone wiring Herdr onto a headless session.
 - The classic hooks are registered by literal event name. Registering them
   from a loop produced no deliveries in the 2.183 probe, so identical-looking
   handlers stay written out; the duplication is the constraint, not sloppiness.

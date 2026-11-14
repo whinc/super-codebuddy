@@ -25,6 +25,8 @@ Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进
 
 子 agent 的 turn 循环被忽略：只要主轮还在进行，面板就算忙。但子 agent 的权限确认照样报 `blocked`，等的是同一个人。
 
+`--seq` 取「上一条 + 1」和当前时间的较大值。Herdr 每个面板按来源只认更高的 `--seq`，所以同一个面板里如果有另一个进程（例如在面板里跑起来的 `codebuddy -p`，它继承了 `HERDR_*`）报过状态，本进程的下一条上报仍然能压过它，面板不会被永久锁在别人的旧状态上。
+
 ## 屏幕兜底
 
 Herdr 的检测清单不能直接给 CodeBuddy 用：官方文档写明，新增一个它不认识的 agent 仍需要 Herdr 二进制更新，本地 manifest 只补规则。所以这一步放在 Mod 里。
