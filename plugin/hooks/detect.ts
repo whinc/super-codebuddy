@@ -53,6 +53,16 @@ const PERMISSION_TITLES = [
 /** The workflow confirmation hides its title above the last rule. */
 const WORKFLOW_TITLE = /run a dynamic workflow\?/i;
 
+/**
+ * The TUI sign-in gate. Unlike the trust screen, which is gone before the
+ * session starts, this one can appear at any request and stops the turn, so
+ * the person has to act on it.
+ */
+const LOGIN_TITLE = /select\s+login\s+method|选择登录方式|選擇登入方式/i;
+const LOGIN_OPTION = /^\s*[>❯]?\s*log\s+in\s+via\b/i;
+const LOGIN_WAITING = /(?:waiting\s+for\s+auth|等待(?:登录|登入|认证))/i;
+const LOGIN_CANCEL = /(?:press\s+esc|按\s*esc)/i;
+
 /** How many closing lines of the reply count as its sign-off. */
 const CLOSING_LINES = 3;
 
@@ -169,6 +179,16 @@ export function classify(snapshot: string): Hit | null {
     if (WORKFLOW_TITLE.test(bottomFlat)) {
       return { id: 'workflow', message: 'approve the workflow' };
     }
+  }
+
+  // The site picker and the wait after the browser opens are the two faces of
+  // the sign-in gate. Its rows are unnumbered, so nothing above matches them.
+  const loginRows = bottomLines.filter(line => LOGIN_OPTION.test(line)).length;
+  if (loginRows >= 2 && LOGIN_TITLE.test(bottomFlat)) {
+    return { id: 'login', message: 'sign in' };
+  }
+  if (LOGIN_WAITING.test(bottomFlat) && LOGIN_CANCEL.test(bottomFlat)) {
+    return { id: 'login', message: 'sign in' };
   }
 
   const options = bottomLines.filter(line => OPTION.test(line)).length;

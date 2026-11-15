@@ -13,8 +13,12 @@ _Avoid_: status, phase
 _Avoid_: default idle, unknown
 
 **Blocked UI（阻塞界面）**:
-面板底部可见、正在等待人处理的审批、提问或权限界面。
+面板底部可见、正在等待人处理的审批、提问、权限或登录界面。
 _Avoid_: dialog, modal, prompt
+
+**Sign-in gate（登录门槛）**:
+TUI 中途弹出的登录方式选择或等待认证界面；它挡在模型请求前面，和权限确认一样算 `blocked`。首轮之前的目录信任界面不在此列：那时会话还没开始，适配器看不到它。
+_Avoid_: login prompt, auth modal
 
 **Detection snapshot（检测快照）**:
 Herdr 屏幕检测所用的底部缓冲区文本；截到面板当前可见的底部，而不是滚动区历史。

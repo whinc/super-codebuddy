@@ -1,0 +1,5 @@
+Browser didn't open? Use the url below to sign in: (Copied link to clipboard)
+
+https://copilot.tencent.com/login?platform=CLI&state=f8941378-c155-43e7-b231-337d6abf02cd&version=2.184.0
+
+✹ Waiting for auth... (Press ESC to cancel)

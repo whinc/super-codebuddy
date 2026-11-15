@@ -30,6 +30,11 @@ const TURN_END_TASK = readFileSync(
   path.join(__dirname, 'test', 'fixtures', 'turn-end-task.txt'),
   'utf8',
 );
+const LOGIN = readFileSync(path.join(__dirname, 'test', 'fixtures', 'login.txt'), 'utf8');
+const LOGIN_WAITING = readFileSync(
+  path.join(__dirname, 'test', 'fixtures', 'login-waiting.txt'),
+  'utf8',
+);
 
 const PERMISSION_EN = [
   'Bash command',
@@ -391,6 +396,14 @@ const QUESTION_REVIEW = [
   'Enter to select · Tab/Arrow keys to navigate',
 ].join('\n');
 
+test('detect: recognises the sign-in gate', async () => {
+  const { classify } = await import(DETECT);
+  assert.equal(classify(LOGIN).id, 'login');
+  assert.equal(classify(LOGIN).message, 'sign in');
+  assert.equal(classify(LOGIN_WAITING).id, 'login', 'the wait after the browser opens');
+  assert.equal(classify(LOGIN_WAITING).message, 'sign in');
+});
+
 test('detect: leaves idle screens and unrelated menus alone', async () => {
   const { classify } = await import(DETECT);
   assert.equal(classify(IDLE), null, 'the prompt box is not a blocker');
@@ -582,6 +595,55 @@ test('clears a notice by the call id it names', async () => {
 
   await adapter.toolDone('Bash', 'toolu_1');
   assert.equal(arg(spawned.at(-1).args, '--state'), 'working', 'the settling call clears the notice');
+});
+
+test('reads the screen when a turn ends without a reply', async () => {
+  let reads = 0;
+  const { spawned, adapter } = await harness({
+    read: async () => {
+      reads++;
+      return PERMISSION_EN;
+    },
+  });
+  await adapter.submit();
+  await adapter.stop();
+
+  assert.equal(reads, 1, 'a silent turn end is the one that looks at the pane');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'waiting for permission');
+});
+
+test('a turn end checks the pane for a dialog the reply cannot describe', async () => {
+  let reads = 0;
+  const { spawned, adapter } = await harness({
+    read: async () => {
+      reads++;
+      return LOGIN;
+    },
+  });
+  await adapter.submit();
+  await adapter.stop('已跑完 12 个测试，全部通过。');
+
+  assert.equal(reads, 1, 'one look per turn end');
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'sign in');
+});
+
+test('a turn end with no dialog on the pane stays idle', async () => {
+  const { spawned, adapter } = await harness({ snapshot: IDLE });
+  await adapter.submit();
+  await adapter.stop('已跑完 12 个测试，全部通过。');
+
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle');
+});
+
+test('a replyless stop keeps the question block', async () => {
+  const { spawned, adapter } = await harness({ snapshot: '' });
+  await adapter.turnComplete({ reason: 'answer', answer: '要我把 P2 也加上吗？' });
+  await adapter.stop();
+
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked', 'the pane read cannot undo it');
+  assert.equal(arg(spawned.at(-1).args, '--message'), 'answer the question');
 });
 
 test('stop reads the reply the turn ended on', async () => {

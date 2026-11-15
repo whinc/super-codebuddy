@@ -239,6 +239,12 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
      * exit witness for a block whose tool never reports back, and its
      * `last_assistant_message` carries the reply turn.complete may have been
      * sampled away from.
+     *
+     * A turn can also end on a modal the model could not get past — the
+     * sign-in gate most of all. The reply text cannot describe that (a failed
+     * request still leaves a message behind), so the turn end looks at the
+     * pane once. Only dialogs count: the prose question above never comes
+     * from here.
      */
     stop(lastReply?: string) {
       busy = false;
@@ -247,7 +253,8 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
       // clears it. A miss never clears a block turn.complete already set,
       // which would put the pane back to idle with the question still there.
       if (lastReply && asksInReply(lastReply)) awaitingReply = true;
-      return recompute();
+      if (awaitingReply) return recompute();
+      return idle({ state: 'idle' });
     },
 
     /**
