@@ -218,6 +218,9 @@ export function createAdapter({ env, deps }: { env: HerdrEnv; deps: Deps }) {
     turnStart(sessionId?: string, agentId?: string) {
       if (agentId) return Promise.resolve();
       busy = true;
+      // A prose question is spent once the next turn starts: the engine can
+      // start one itself (a finished task, auto mode), with no prompt to clear it.
+      awaitingReply = false;
       const changed = sessionId && SESSION_ID.test(sessionId) && sessionId !== lastSessionId;
       return recompute(changed ? { sessionId } : {});
     },

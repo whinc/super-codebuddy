@@ -19,7 +19,7 @@ Herdr 把 `HERDR_ENV`、`HERDR_PANE_ID`、`HERDR_BIN_PATH` 写进它启动的进
 | `classic.Notification` → `permission_prompt` | `blocked`：引擎在等待前发出 `needs your permission to use <tool>`；PTC 提问、计划批准都在这时拦住 |
 | `classic.PostToolUse`／`PostToolUseFailure` / `tool.call` 结算 | 清掉这一次调用的等待项，回到 `working`；轮外（别的 Mod 用 `$.ui.ask` 提问）回 `idle` |
 | `classic.PermissionDenied` | 拒绝之后不再有工具结算，这里按 `tool_use_id` 清掉这次调用挂的等待；同时等着的其他确认不受影响 |
-| `turn.complete` | `idle`：`reason` 为 `answer` 且回复收尾在提问（`answer` 字段）则报 `blocked`（`answer the question`），`Stop` 的 `last_assistant_message` 兜同一份判定；轮末不读屏，下一次 `UserPromptSubmit` 清除 |
+| `turn.complete` | `idle`：`reason` 为 `answer` 且回复收尾在提问（`answer` 字段）则报 `blocked`（`answer the question`），`Stop` 的 `last_assistant_message` 兜同一份判定；轮末不读屏；下一轮开始时清除（`UserPromptSubmit`，或引擎自己续跑的 `turn.start`） |
 | `session.end`（`clear`、`resume`） | `idle`：进程比这次对话活得久；读屏命中则报 `blocked` |
 | `session.end`（其他情况） | 释放 agent |
 

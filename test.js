@@ -451,6 +451,20 @@ test('blocks at turn end when the reply asks', async () => {
   assert.equal(arg(last, '--message'), 'answer the question');
 });
 
+test('clears a prose block when the engine starts the next turn itself', async () => {
+  const { spawned, adapter } = await harness();
+  await adapter.submit();
+  await adapter.turnComplete({ reason: 'answer', answer: '要我把 P2 也加上吗？' });
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'blocked');
+
+  // No UserPromptSubmit here: a finished task or auto mode starts the round.
+  await adapter.turnStart();
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'working');
+
+  await adapter.turnComplete(END);
+  assert.equal(arg(spawned.at(-1).args, '--state'), 'idle', 'the spent question stays spent');
+});
+
 test('keeps a non-answer turn idle', async () => {
   const { spawned, adapter } = await harness();
   await adapter.turnComplete({ reason: 'aborted', answer: '要我继续吗？' });
